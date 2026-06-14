@@ -191,6 +191,11 @@ def _run_batch_mode(
                 console.log(f"[dim]→ {r.name}[/dim]")
         elif event == "done":
             console.log(f"[green]✓[/green] {r.name} ({r.elapsed_s:.1f}s) → {r.output_path}")
+        elif event == "blocked":
+            console.log(
+                f"[yellow]⚠[/yellow] {r.name} ({r.elapsed_s:.1f}s) → "
+                f"{r.output_path} [yellow](blocked: {r.block_reason})[/yellow]"
+            )
         elif event == "error":
             console.log(f"[red]✗[/red] {r.name} ({r.elapsed_s:.1f}s) — {r.error}")
 
@@ -214,13 +219,17 @@ def _run_batch_mode(
     ext = {"markdown": "md", "json": "json", "prompt": "md"}[fmt]
     index_path = write_index(out_dir, query, sites, results, fmt_ext=ext)
 
-    ok = sum(1 for r in results if r.ok)
-    fail = len(results) - ok
-    console.log(
-        f"[bold]done[/bold]: {ok} succeeded, {fail} failed → "
-        f"[green]{out_dir}[/green] (see {index_path.name})"
-    )
-    if fail and ok == 0:
+    clean = sum(1 for r in results if r.ok and not r.blocked)
+    blocked = sum(1 for r in results if r.ok and r.blocked)
+    fail = sum(1 for r in results if not r.ok)
+    summary = f"[bold]done[/bold]: {clean} clean"
+    if blocked:
+        summary += f", [yellow]{blocked} blocked[/yellow]"
+    if fail:
+        summary += f", [red]{fail} failed[/red]"
+    summary += f" → [green]{out_dir}[/green] (see {index_path.name})"
+    console.log(summary)
+    if fail and clean == 0 and blocked == 0:
         sys.exit(4)
 
 

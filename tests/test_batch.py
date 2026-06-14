@@ -5,7 +5,13 @@ from __future__ import annotations
 import asyncio
 
 from stylescrape import batch as batch_mod
-from stylescrape.batch import BatchResult, run_batch, slugify, write_index
+from stylescrape.batch import (
+    BatchResult,
+    detect_block_signal,
+    run_batch,
+    slugify,
+    write_index,
+)
 from stylescrape.discovery import DiscoveredSite
 from stylescrape.types import (
     ColorToken,
@@ -150,6 +156,105 @@ class TestRunBatch:
         assert peak <= 2
 
 
+class TestDetectBlockSignal:
+    def _tokens_with_title(self, title: str) -> DesignTokens:
+        t = _fake_tokens("https://example.com")
+        t.title = title
+        return t
+
+    def test_clean_title_not_blocked(self):
+        blocked, reason = detect_block_signal(self._tokens_with_title("Linear — Plan and build products"))
+        assert not blocked
+        assert reason == ""
+
+    def test_access_denied(self):
+        blocked, reason = detect_block_signal(self._tokens_with_title("Access Denied"))
+        assert blocked
+        assert "access denied" in reason
+
+    def test_cloudflare_challenge(self):
+        blocked, reason = detect_block_signal(self._tokens_with_title("Just a moment..."))
+        assert blocked
+        assert "Cloudflare" in reason
+
+    def test_cloudflare_waf(self):
+        blocked, reason = detect_block_signal(self._tokens_with_title("Attention Required! | Cloudflare"))
+        assert blocked
+        assert "Cloudflare" in reason
+
+    def test_perimeterx(self):
+        blocked, _ = detect_block_signal(self._tokens_with_title("Pardon Our Interruption"))
+        assert blocked
+
+    def test_captcha(self):
+        blocked, _ = detect_block_signal(self._tokens_with_title("Please complete the CAPTCHA"))
+        assert blocked
+
+    def test_403(self):
+        blocked, reason = detect_block_signal(self._tokens_with_title("403 Forbidden"))
+        assert blocked
+        assert "403" in reason or "forbidden" in reason.lower()
+
+    def test_404(self):
+        blocked, _ = detect_block_signal(self._tokens_with_title("404 Not Found"))
+        assert blocked
+
+    def test_bot_block(self):
+        blocked, _ = detect_block_signal(
+            self._tokens_with_title("Sorry, you have been blocked")
+        )
+        assert blocked
+
+    def test_empty_title_not_blocked(self):
+        # Empty title is suspicious but not a positive block signal — many SPAs
+        # lazy-set the title. Don't false-flag.
+        blocked, _ = detect_block_signal(self._tokens_with_title(""))
+        assert not blocked
+
+
+class TestRunBatchBlockedFlow:
+    def test_blocked_capture_writes_file_and_flags_result(self, tmp_path, mocker):
+        async def fake_scrape(url, _opts):
+            t = _fake_tokens(url)
+            t.title = "Access Denied"
+            return t
+
+        mocker.patch.object(batch_mod, "_scrape", side_effect=fake_scrape)
+        sites = [DiscoveredSite(name="Locked", url="https://locked.example.com")]
+        results = asyncio.run(
+            run_batch(sites, output_dir=tmp_path, opts=RenderOptions(), concurrency=1)
+        )
+        assert results[0].ok is True
+        assert results[0].blocked is True
+        assert "access denied" in results[0].block_reason
+        # Markdown is still written — the user can inspect what came back
+        assert (tmp_path / "locked-example-com.md").exists()
+
+    def test_progress_emits_blocked_event(self, tmp_path, mocker):
+        async def fake_scrape(url, _opts):
+            t = _fake_tokens(url)
+            t.title = "Just a moment..."
+            return t
+
+        mocker.patch.object(batch_mod, "_scrape", side_effect=fake_scrape)
+        events = []
+
+        def cb(event, _r):
+            events.append(event)
+
+        asyncio.run(
+            run_batch(
+                [DiscoveredSite(name="X", url="https://x.example.com")],
+                output_dir=tmp_path,
+                opts=RenderOptions(),
+                concurrency=1,
+                on_progress=cb,
+            )
+        )
+        assert "blocked" in events
+        assert "done" not in events
+
+
 class TestWriteIndex:
     def test_index_lists_successes_and_failures(self, tmp_path):
         sites = [
@@ -181,5 +286,39 @@ class TestWriteIndex:
         assert "_failed_" in body
         assert "timeout" in body
         # Summary numbers
-        assert "Successful: 1 / 2" in body
+        assert "Clean captures: 1 / 2" in body
         assert "Failed: 1" in body
+
+    def test_index_flags_blocked_entries(self, tmp_path):
+        sites = [
+            DiscoveredSite(name="Linear", url="https://linear.app", rationale="x"),
+            DiscoveredSite(name="ServiceNow", url="https://servicenow.com", rationale="y"),
+        ]
+        results = [
+            BatchResult(
+                name="Linear",
+                url="https://linear.app",
+                ok=True,
+                slug="linear-app",
+                output_path=str(tmp_path / "linear-app.md"),
+                elapsed_s=2.1,
+            ),
+            BatchResult(
+                name="ServiceNow",
+                url="https://servicenow.com",
+                ok=True,
+                blocked=True,
+                block_reason="access denied",
+                slug="servicenow-com",
+                output_path=str(tmp_path / "servicenow-com.md"),
+                elapsed_s=3.0,
+            ),
+        ]
+        body = write_index(tmp_path, "x", sites, results).read_text()
+        assert "⚠ blocked" in body
+        assert "access denied" in body
+        # Summary breaks out the block reason
+        assert "Blocked / interstitial: 1" in body
+        assert "ServiceNow — access denied" in body
+        # Clean tally excludes blocked
+        assert "Clean captures: 1 / 2" in body
