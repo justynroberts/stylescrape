@@ -1,0 +1,32 @@
+You are analysing the visual personality of a website's design system. Read the raw token summary below and describe the overall aesthetic feel in 2-3 sentences. Focus on mood, discipline, density, warmth/coolness, and the kind of product it feels like. Do NOT list colours or specifics — write it as a designer's gut take.
+
+Output only the description, no preamble.
+
+<tokens>
+URL: {{ tokens.url }}
+Title: {{ tokens.title }}
+Scheme: {{ tokens.scheme }}
+
+Colours ({{ tokens.colors | length }} clustered):
+{%- for c in tokens.colors[:10] %}
+  - {{ c.hex }} ({{ c.role }}, freq {{ c.frequency }})
+{%- endfor %}
+
+Typography:
+  Families: {{ tokens.typography.font_families }}
+  Size scale: {{ tokens.typography.size_scale | join(', ') }}
+  Weights: {{ tokens.typography.weights | join(', ') }}
+
+Shape:
+  Radii: {{ tokens.shape.radii | join(', ') }}
+  Shadows used: {{ tokens.shape.shadows | length }}
+
+Motion:
+  Durations: {{ tokens.motion.durations | join(', ') }}
+  Easings: {{ tokens.motion.easings | join(', ') }}
+
+Components present:
+{%- for c in tokens.components if c.present %}
+  - {{ c.name }}: {{ c.notes }}
+{%- endfor %}
+</tokens>

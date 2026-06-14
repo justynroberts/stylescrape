@@ -1,0 +1,58 @@
+You are about to receive a structured description of a website's design system, extracted from {{ tokens.url }}. Rewrite it as a clear, self-contained design brief that another instance of Claude can use as a prefix when generating UI work in this aesthetic.
+
+Rules for your output:
+- Use hex values, not CSS variable names.
+- Describe components in natural language, not CSS rules.
+- Lead with the personality paragraph as the framing.
+- Keep section headings: PERSONALITY, COLOUR PALETTE, TYPOGRAPHY, SPACING & SHAPE, ELEVATION, MOTION, COMPONENTS, USAGE.
+- In USAGE, give 3-5 short instructions for applying this system in new UI work.
+- Do not invent values that aren't in the source. If something is empty, say so honestly.
+- Do not include preamble, meta-commentary, or "here is the brief" — just the brief itself.
+
+=== SOURCE ===
+
+URL: {{ tokens.url }}
+Title: {{ tokens.title }}
+Detected scheme: {{ tokens.scheme }}
+
+PERSONALITY (rewrite, don't quote literally):
+{{ personality }}
+
+COLOURS (hex, role, frequency):
+{%- for c in tokens.colors %}
+- {{ c.hex }}  role: {{ c.role }}  freq: {{ c.frequency }}
+{%- endfor %}
+
+TYPOGRAPHY:
+{%- for role, stack in tokens.typography.font_families.items() %}
+- {{ role }}: {{ stack }}
+{%- endfor %}
+- Size scale (small → large): {{ tokens.typography.size_scale | join(', ') }}
+- Weights observed: {{ tokens.typography.weights | join(', ') }}
+- Line heights: {{ tokens.typography.line_heights | join(', ') }}
+- Letter spacings: {{ tokens.typography.letter_spacings | join(', ') }}
+
+SHAPE & SPACING:
+- Radii: {{ tokens.shape.radii | join(', ') }}
+- Common paddings: {{ tokens.shape.spacings | join(' | ') }}
+
+ELEVATION (raw shadow values to translate into a scale):
+{%- for sh in tokens.shape.shadows %}
+- {{ sh }}
+{%- endfor %}
+
+MOTION:
+- Durations: {{ tokens.motion.durations | join(', ') }}
+- Easings: {{ tokens.motion.easings | join(', ') }}
+
+COMPONENTS DETECTED:
+{%- for c in tokens.components if c.present %}
+- {{ c.name }}: {{ c.notes }}
+{%- if c.treatment %}
+  treatment: {{ c.treatment }}
+{%- endif %}
+{%- endfor %}
+
+=== END SOURCE ===
+
+Now produce the polished design brief.

@@ -1,0 +1,47 @@
+# Design system: {{ tokens.title or tokens.url }}
+
+**Source:** {{ tokens.url }}
+**Detected scheme:** {{ tokens.scheme }}
+
+## Colour palette
+
+| Hex | Role | Frequency |
+|---|---|---|
+{%- for c in tokens.colors %}
+| `{{ c.hex }}` | {{ c.role }} | {{ c.frequency }} |
+{%- endfor %}
+
+## Typography
+
+{%- for role, stack in tokens.typography.font_families.items() %}
+- **{{ role }}**: `{{ stack }}`
+{%- endfor %}
+
+- **Size scale:** {{ tokens.typography.size_scale | join(' · ') }}
+- **Weights:** {{ tokens.typography.weights | join(', ') }}
+- **Line heights:** {{ tokens.typography.line_heights | join(', ') }}
+- **Letter spacings:** {{ tokens.typography.letter_spacings | join(', ') }}
+
+## Shape
+
+- **Radii:** {{ tokens.shape.radii | join(', ') }}
+- **Common paddings:** {{ tokens.shape.spacings | join(' | ') }}
+
+## Elevation
+
+{%- for sh in tokens.shape.shadows %}
+- `{{ sh }}`
+{%- endfor %}
+
+## Motion
+
+- **Durations:** {{ tokens.motion.durations | join(', ') }}
+- **Easings:** {{ tokens.motion.easings | join(', ') }}
+
+## Components
+
+| Pattern | Present | Notes |
+|---|---|---|
+{%- for c in tokens.components %}
+| {{ c.name }} | {{ 'yes' if c.present else 'no' }} | {{ c.notes }} |
+{%- endfor %}
