@@ -254,7 +254,7 @@ def _run_batch_mode(
 @click.option("--dark", "dark", is_flag=True, help="Force prefers-color-scheme: dark.")
 @click.option("--light", "light", is_flag=True, help="Force prefers-color-scheme: light.")
 @click.option("--screenshot", "shot", type=click.Path(), default=None, help="[single] Save a screenshot.")
-@click.option("--verbose", is_flag=True, help="Show progress and timing.")
+@click.option("--verbose", "-v", is_flag=True, help="Show progress and timing.")
 @click.option(
     "--output",
     "-o",
