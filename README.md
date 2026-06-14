@@ -109,6 +109,87 @@ Batch flags:
 | `--with-prompt` | off | Also run the two-stage `claude -p` per site. |
 | `--dry-run` | off | Discover URLs and print them; skip rendering. |
 
+## Examples
+
+### Single-site lookups
+
+```bash
+# 1. Default: render, extract, run two-stage claude -p, print polished design brief
+stylescrape https://linear.app
+
+# 2. Just the raw tokens — pipe into jq or another tool
+stylescrape https://linear.app --format json | jq '.colors[0:5]'
+
+# 3. Human-readable summary, no LLM calls, costs nothing
+stylescrape https://linear.app --format markdown
+
+# 4. Print the assembled prompt without invoking claude
+#    (review it first, then pipe it yourself, or save for later)
+stylescrape https://linear.app --no-claude > linear-prompt.txt
+
+# 5. Save the polished brief straight to a file you can use as a prompt prefix later
+stylescrape https://linear.app --output linear-system.md
+
+# 6. Force the dark-mode media query when rendering (sites that auto-detect)
+stylescrape https://stripe.com --dark --output stripe-dark.md
+
+# 7. Focus extraction on a specific container (e.g. the dashboard shell of an SPA)
+stylescrape https://example.com/app --selector ".dashboard" --wait 4000
+
+# 8. Save a screenshot alongside the design brief
+stylescrape https://linear.app --screenshot linear.png --output linear-system.md
+
+# 9. Verbose: see per-stage timings + skipped probes
+stylescrape https://anthropic.com --verbose
+```
+
+### Batch catalogues
+
+```bash
+# 10. Catalogue the top 10 CRM tool design systems into a directory
+stylescrape --batch "top 10 CRM tools" -o ./design-systems-crm/
+
+# 11. Tighter scope: top 5 password managers, higher concurrency for speed
+stylescrape --batch "top 5 password managers" -n 5 -c 5 -o ./pw/
+
+# 12. Dry-run first: see which sites claude picks before spending render time
+stylescrape --batch "top 10 admin UI templates" -o ./admin/ --dry-run
+
+# 13. Big sweep: top 20 dev-tool landing pages with verbose per-site progress
+stylescrape --batch "top 20 developer tool landing pages" -n 20 -c 4 -v -o ./devtools/
+
+# 14. Also generate the polished claude -p brief per site (slow, costs LLM calls)
+stylescrape --batch "top 5 fintech landing pages" --with-prompt -o ./fintech/
+
+# 15. Force dark-mode rendering across an entire batch
+stylescrape --batch "top 10 terminal apps" --dark -o ./terminals/
+
+# 16. JSON per site instead of markdown — for programmatic consumption
+stylescrape --batch "top 10 SaaS pricing pages" --format json -o ./pricing/
+```
+
+### Composing with other tools
+
+```bash
+# 17. Pipe the prompt straight into another claude call (no temp file)
+stylescrape https://linear.app --no-claude | claude -p "Use this design system to build a sign-up form."
+
+# 18. Extract just the palette as hex codes
+stylescrape https://stripe.com --format json | jq -r '.colors[].hex'
+
+# 19. Compare the palettes of two sites with diff
+diff \
+  <(stylescrape https://linear.app --format json | jq -r '.colors[].hex') \
+  <(stylescrape https://notion.so --format json | jq -r '.colors[].hex')
+
+# 20. Loop a small custom list (when batch discovery isn't what you want)
+for url in https://linear.app https://notion.so https://figma.com; do
+  stylescrape "$url" --format markdown --output "$(basename $url).md"
+done
+```
+
+> Tip: in the default (polished prompt) mode, single-site renders take ~3–8s and use two `claude -p` calls. To skip both LLM calls entirely, add `--no-claude`. For batch runs, only the initial discovery call goes through `claude -p` unless you also pass `--with-prompt`.
+
 ## What you get back
 
 Default mode produces something like:
