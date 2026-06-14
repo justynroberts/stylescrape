@@ -65,7 +65,7 @@ def discover(
     query: str,
     count: int = 10,
     model: str | None = None,
-    timeout: int = 60,
+    timeout: int = 120,
 ) -> list[DiscoveredSite]:
     """Ask `claude -p` for the top `count` sites for `query`."""
     if not claude_available():
