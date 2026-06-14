@@ -327,14 +327,17 @@ def _detect_elevation_steps(captures: list[RawCapture]) -> list[ElevationStep]:
 
 
 _TOKEN_ROLE_KEYWORDS: list[tuple[str, list[str]]] = [
-    ("color", ["color", "colour", "bg", "background", "fg", "foreground", "accent",
-                "primary", "secondary", "surface", "text", "ink", "border",
-                "outline", "shadow", "ring", "tint"]),
-    ("spacing", ["space", "gap", "pad", "margin", "inset", "offset"]),
-    ("radius", ["radius", "corner", "round"]),
+    # Order matters: first match wins. The more specific suffix-style roles
+    # (radius / spacing / motion / typography) come before the catch-all colour
+    # bucket so e.g. `--border-radius` resolves to radius, not colour.
+    ("radius", ["radius", "rounded", "corner"]),
+    ("spacing", ["spacing", "space", "gap", "pad", "margin", "inset", "offset"]),
     ("motion", ["duration", "speed", "timing", "ease", "transition", "animation"]),
     ("typography", ["font", "family", "weight", "leading", "tracking", "letter"]),
     ("size", ["size", "scale", "step", "width", "height", "max-w", "min-w"]),
+    ("color", ["color", "colour", "bg", "background", "fg", "foreground", "accent",
+                "primary", "secondary", "surface", "text", "ink", "border",
+                "outline", "shadow", "ring", "tint", "fill", "stroke"]),
 ]
 
 
@@ -347,6 +350,9 @@ def _infer_token_role(name: str) -> str:
     return "other"
 
 
+_DISPLAY_ORDER = ["color", "typography", "spacing", "radius", "size", "motion", "other"]
+
+
 def _harvest_named_tokens(captures: list[RawCapture]) -> list[NamedToken]:
     seen: dict[str, str] = {}
     for cap in captures:
@@ -356,10 +362,11 @@ def _harvest_named_tokens(captures: list[RawCapture]) -> list[NamedToken]:
     tokens = [
         NamedToken(name=n, value=v, role=_infer_token_role(n)) for n, v in seen.items()
     ]
-    # Group by role for stable, readable output: colours first, then spacing, etc.
-    role_order = {r[0]: i for i, r in enumerate(_TOKEN_ROLE_KEYWORDS)}
-    role_order["other"] = len(role_order)
-    tokens.sort(key=lambda t: (role_order.get(t.role, 99), t.name))
+    # Display order prioritises palette + type since they carry the most design
+    # signal; the inference order (above) is specificity-first to disambiguate
+    # multi-word names like `--border-radius`.
+    role_rank = {r: i for i, r in enumerate(_DISPLAY_ORDER)}
+    tokens.sort(key=lambda t: (role_rank.get(t.role, 99), t.name))
     return tokens
 
 

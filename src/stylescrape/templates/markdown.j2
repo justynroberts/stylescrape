@@ -105,12 +105,12 @@ _No distinct surface tones detected._
 {%- endfor %}
 {%- for role, items in role_groups.items() %}
 
-### {{ role }}
-{% for t in items[:20] %}
+### {{ role }} ({{ items | length }})
+{% for t in items[:40] %}
 - `{{ t.name }}`: `{{ t.value }}`
 {%- endfor %}
-{%- if items | length > 20 %}
-- _…and {{ items | length - 20 }} more {{ role }} tokens_
+{%- if items | length > 40 %}
+- _…and {{ items | length - 40 }} more {{ role }} tokens (use `--format json` for the full set)_
 {%- endif %}
 {%- endfor %}
 {% else %}

@@ -347,14 +347,26 @@ class TestNamedTokens:
         assert _infer_token_role("--font-sans") == "typography"
         assert _infer_token_role("--unknown-thing") == "other"
 
+    def test_spacing_keyword_matches_spacing_suffix(self):
+        # Regression: 'space' substring doesn't match 'spacing' literally — the
+        # keyword list needs 'spacing' too. Real-world: Linear's
+        # --editor-block-spacing used to fall into 'other'.
+        assert _infer_token_role("--editor-block-spacing") == "spacing"
+        assert _infer_token_role("--row-spacing") == "spacing"
+
+    def test_border_radius_resolves_to_radius_not_color(self):
+        # Regression: 'border' is a colour keyword and 'radius' is a radius
+        # keyword; first match wins, so radius must be checked first.
+        assert _infer_token_role("--border-radius") == "radius"
+        assert _infer_token_role("--border-radius-sm") == "radius"
+
     def test_text_ambiguity_resolves_to_color(self):
         # 'text-*' tokens are usually text colour ("text-primary", "text-muted").
-        # The heuristic intentionally biases to color since that's the more common
-        # design-token meaning. Size tokens usually carry their own size noun.
+        # 'text' lives in the colour keyword list. Size tokens carry a size noun.
         assert _infer_token_role("--text-primary") == "color"
         assert _infer_token_role("--text-muted") == "color"
 
-    def test_harvest_dedupes_and_sorts_by_role(self):
+    def test_harvest_dedupes_and_sorts_by_display_role(self):
         cap1 = RawCapture(
             url="https://x", title="x", sampled_styles={}, dom_signals={},
             custom_props={
@@ -366,13 +378,13 @@ class TestNamedTokens:
         cap2 = RawCapture(
             url="https://x/pricing", title="x", sampled_styles={}, dom_signals={},
             custom_props={
-                "--color-primary": "different",  # dedup wins by first capture
+                "--color-primary": "different",  # dedup keeps the first-seen value
                 "--radius-md": "8px",
             },
         )
         tokens = _harvest_named_tokens([cap1, cap2])
         names = [t.name for t in tokens]
-        # Colours come before spacing before radius before other (per role order)
+        # Display order: color → typography → spacing → radius → size → motion → other
         assert names.index("--color-primary") < names.index("--space-3")
         assert names.index("--space-3") < names.index("--radius-md")
         # Dedup preserved first value
