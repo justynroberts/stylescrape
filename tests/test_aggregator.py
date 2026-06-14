@@ -360,6 +360,116 @@ class TestNamedTokens:
         assert _infer_token_role("--border-radius") == "radius"
         assert _infer_token_role("--border-radius-sm") == "radius"
 
+    def test_z_index_bucket(self):
+        assert _infer_token_role("--z-index-modal") == "z-index"
+        assert _infer_token_role("--layer-1") == "z-index"
+        assert _infer_token_role("--layer-command-menu") == "z-index"
+        assert _infer_token_role("--zindex-tooltip") == "z-index"
+
+    def test_z_index_word_boundary_does_not_false_positive(self):
+        # 'layer' appears as a substring in 'player' — must not match z-index.
+        assert _infer_token_role("--player-controls") == "other"
+
+    def test_cursor_bucket(self):
+        assert _infer_token_role("--cursor-pointer") == "cursor"
+        assert _infer_token_role("--cursor-disabled") == "cursor"
+
+    def test_viewport_bucket(self):
+        # Viewport-unit aliases that bare the unit name as the trailing token.
+        assert _infer_token_role("--100dvh") == "viewport"
+        assert _infer_token_role("--svh") == "viewport"
+        assert _infer_token_role("--dvw") == "viewport"
+
+    def test_breakpoint_bucket(self):
+        assert _infer_token_role("--screen-md") == "breakpoint"
+        assert _infer_token_role("--breakpoint-lg") == "breakpoint"
+
+    def test_effect_bucket(self):
+        assert _infer_token_role("--header-blur") == "effect"
+        assert _infer_token_role("--backdrop-filter") == "effect"
+        assert _infer_token_role("--icon-grayscale-image-filter") == "effect"
+        assert _infer_token_role("--opacity-50") == "effect"
+
+    def test_grid_bucket(self):
+        assert _infer_token_role("--grid-columns") == "grid"
+        assert _infer_token_role("--grid-template") == "grid"
+
+    def test_aspect_bucket(self):
+        assert _infer_token_role("--aspect-video") == "aspect"
+
+    def test_compound_keyword_substring(self):
+        # 'line-height' is a compound keyword — should match the full name
+        # even though parts split as ["editor", "line", "height"].
+        assert _infer_token_role("--editor-line-height") == "typography"
+        # And 'z-index' as a compound:
+        assert _infer_token_role("--z-index-toast") == "z-index"
+
+    def test_padding_keyword_catches_dashed_form(self):
+        # 'pad' alone doesn't word-match 'padding' — adding 'padding' explicitly
+        # is why these resolve.
+        assert _infer_token_role("--page-padding-block") == "spacing"
+        assert _infer_token_role("--homepage-outer-padding") == "spacing"
+
+    def test_mask_keyword_in_effects(self):
+        assert _infer_token_role("--mask-visible") == "effect"
+        assert _infer_token_role("--mask-off") == "effect"
+
+    def test_value_fallback_hex_color(self):
+        # Opaque CSS-in-JS hash name; value carries the signal.
+        assert _infer_token_role("--sx-105wzx7", "#edbf0a") == "color"
+
+    def test_value_fallback_rgba_color(self):
+        assert _infer_token_role("--sx-abc", "rgba(255, 0, 0, 0.5)") == "color"
+
+    def test_value_fallback_oklch_color(self):
+        assert _infer_token_role("--sx-abc", "oklch(82.8% .189 84.429)") == "color"
+
+    def test_value_fallback_box_shadow(self):
+        v = "0px 4px 4px -1px #0000000a, 0px 1px 1px 0px #00000014"
+        assert _infer_token_role("--sx-10lzhmx", v) == "color"
+
+    def test_value_fallback_unitless_shadow(self):
+        # CSS allows unitless 0 in shadows.
+        v = "0 0 0 0.5px #323439"
+        assert _infer_token_role("--sx-axo4ug", v) == "color"
+
+    def test_value_fallback_inset_shadow(self):
+        v = "0 1px 1px inset #00000011, 0 1px 3px inset #00000011, 0 2px 5px inset #00000019"
+        assert _infer_token_role("--sx-umgfby", v) == "color"
+
+    def test_value_fallback_duration(self):
+        assert _infer_token_role("--sx-abc", "250ms") == "motion"
+        assert _infer_token_role("--sx-abc", "0.3s") == "motion"
+
+    def test_value_fallback_viewport(self):
+        assert _infer_token_role("--sx-138rywl", "13vh") == "viewport"
+        assert _infer_token_role("--sx-abc", "100dvh") == "viewport"
+
+    def test_value_fallback_font_family_with_sans_marker(self):
+        v = 'Inter, "SF Pro Display", Arial, sans-serif'
+        assert _infer_token_role("--sx-abc", v) == "typography"
+
+    def test_value_fallback_font_family_quoted_csv(self):
+        # No sans-serif marker, but 3+ quoted family names is a strong signal.
+        # Real-world: Linear's emoji font fallback chain.
+        v = (
+            '"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol",'
+            '"Segoe UI","Twemoji Mozilla","Noto Color Emoji","Android Emoji"'
+        )
+        assert _infer_token_role("--sx-abc", v) == "typography"
+
+    def test_value_fallback_grid(self):
+        assert _infer_token_role("--1fr", "minmax(0,1fr)") == "grid"
+        assert _infer_token_role("--sx-abc", "repeat(3, 1fr)") == "grid"
+
+    def test_value_fallback_spacing_shorthand(self):
+        assert _infer_token_role("--sx-18pfyxa", "6px 12px") == "spacing"
+        assert _infer_token_role("--sx-abc", "4px 8px 4px 8px") == "spacing"
+
+    def test_value_fallback_skipped_when_name_matches(self):
+        # Name-based wins even if the value would also match.
+        assert _infer_token_role("--space-3", "#ff0000") == "spacing"
+
     def test_text_ambiguity_resolves_to_color(self):
         # 'text-*' tokens are usually text colour ("text-primary", "text-muted").
         # 'text' lives in the colour keyword list. Size tokens carry a size noun.

@@ -328,29 +328,144 @@ def _detect_elevation_steps(captures: list[RawCapture]) -> list[ElevationStep]:
 
 _TOKEN_ROLE_KEYWORDS: list[tuple[str, list[str]]] = [
     # Order matters: first match wins. The more specific suffix-style roles
-    # (radius / spacing / motion / typography) come before the catch-all colour
-    # bucket so e.g. `--border-radius` resolves to radius, not colour.
+    # come before the catch-all colour bucket so e.g. `--border-radius`
+    # resolves to radius, not colour.
     ("radius", ["radius", "rounded", "corner"]),
-    ("spacing", ["spacing", "space", "gap", "pad", "margin", "inset", "offset"]),
-    ("motion", ["duration", "speed", "timing", "ease", "transition", "animation"]),
-    ("typography", ["font", "family", "weight", "leading", "tracking", "letter"]),
-    ("size", ["size", "scale", "step", "width", "height", "max-w", "min-w"]),
+    ("spacing", ["spacing", "padding", "padded", "space", "gap", "gutter",
+                  "margin", "pad", "inset", "offset"]),
+    ("motion", ["duration", "speed", "timing", "ease", "transition", "animation",
+                 "delay"]),
+    ("typography", ["font", "family", "weight", "leading", "tracking",
+                     "letter-spacing", "line-height", "uppercase", "lowercase"]),
+    ("z-index", ["z-index", "zindex", "layer"]),
+    ("cursor", ["cursor"]),
+    ("viewport", ["dvh", "svh", "lvh", "dvw", "svw", "lvw", "vw", "vh"]),
+    ("breakpoint", ["breakpoint", "screen", "media"]),
+    ("effect", ["blur", "filter", "opacity", "backdrop", "saturation",
+                 "brightness", "contrast", "grayscale", "sepia", "invert",
+                 "hue-rotate", "mask"]),
+    ("grid", ["grid", "columns", "gutter"]),
+    ("aspect", ["aspect"]),
+    ("size", ["size", "scale", "step", "width", "height", "max-w", "min-w",
+              "thickness", "stroke-width"]),
     ("color", ["color", "colour", "bg", "background", "fg", "foreground", "accent",
                 "primary", "secondary", "surface", "text", "ink", "border",
-                "outline", "shadow", "ring", "tint", "fill", "stroke"]),
+                "outline", "shadow", "ring", "tint", "fill", "stroke",
+                "highlight", "subtle", "bolder"]),
 ]
 
 
-def _infer_token_role(name: str) -> str:
+# Value-based inference: when the name carries no signal (CSS-in-JS hash names
+# like `--sx-105wzx7`), the resolved value usually does. Patterns checked in
+# order; first match wins. Less aggressive than name-based — we only fall
+# through to this if name inference returned "other".
+_VALUE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"^\s*#[0-9a-f]{3,8}\s*$", re.I), "color"),
+    (re.compile(r"\b(rgb|rgba|hsl|hsla|oklch|oklab|color)\s*\("), "color"),
+    (re.compile(r"gradient\("), "color"),
+    (re.compile(r"^\s*(transparent|currentcolor)\s*$"), "color"),
+    # Border shorthand: `1px solid #323439`
+    (re.compile(
+        r"^\s*[\d.]+px\s+(solid|dashed|dotted|double|groove|ridge|inset|outset)\s+"
+        r"(#|rgba?\(|hsla?\()",
+        re.I,
+    ), "color"),
+    # Box-shadow / outline: 2+ numeric offsets (with or without px), optionally
+    # `inset`, then a colour. CSS allows unitless 0, so e.g. `0 0 0 1px #5e69d1`
+    # is a real shadow, as is `0 1px 3px inset #00000011`.
+    (re.compile(
+        r"(?:\d+(?:\.\d+)?(?:px)?\s+){1,5}"
+        r"(?:inset\s+)?(?:\d+(?:\.\d+)?(?:px)?\s+)?"
+        r"(?:inset\s+)?(#|rgba?\(|hsla?\()",
+        re.I,
+    ), "color"),
+    (re.compile(r"^\s*[\d.]+m?s\s*$"), "motion"),
+    (re.compile(r"cubic-bezier\("), "motion"),
+    (re.compile(r"\b\d*\.?\d+(dvh|svh|lvh|dvw|svw|lvw|vh|vw)\b"), "viewport"),
+    (re.compile(r"\b(serif|sans-serif|monospace|cursive|fantasy)\b"), "typography"),
+    # Quoted CSV with ≥3 items — typical font-family stack pattern even without
+    # the trailing sans-serif marker (e.g. Linear's emoji font fallback chain).
+    (re.compile(r'^\s*"[^"]+"\s*(?:,\s*"[^"]+"\s*){2,}$'), "typography"),
+    (re.compile(r"^\s*(1fr|auto|min-content|max-content)\s*$"), "grid"),
+    (re.compile(r"\b(minmax|repeat)\("), "grid"),
+    # Padding / margin shorthand — 2 to 4 px values
+    (re.compile(r"^\s*[\d.]+px(\s+[\d.]+px){1,3}\s*$"), "spacing"),
+]
+
+# Exact CSS cursor keywords — when the value is literally one of these, the
+# token is cursor-related regardless of name.
+_CURSOR_VALUES: frozenset[str] = frozenset({
+    "default", "pointer", "none", "help", "wait", "text", "move", "alias",
+    "cell", "copy", "no-drop", "not-allowed", "context-menu", "crosshair",
+    "vertical-text", "grab", "grabbing", "zoom-in", "zoom-out", "all-scroll",
+    "col-resize", "row-resize",
+    "n-resize", "e-resize", "s-resize", "w-resize",
+    "ne-resize", "nw-resize", "se-resize", "sw-resize",
+    "ew-resize", "ns-resize", "nesw-resize", "nwse-resize",
+})
+
+
+def _infer_role_from_value(value: str) -> str:
+    v = (value or "").strip().lower()
+    if not v:
+        return ""
+    if v in _CURSOR_VALUES:
+        return "cursor"
+    for pattern, role in _VALUE_PATTERNS:
+        if pattern.search(v):
+            return role
+    return ""
+
+
+def _infer_token_role(name: str, value: str = "") -> str:
+    """Bucket a custom-property by name (and value as fallback).
+
+    Names are dash-separated by convention; we treat dashes as word boundaries
+    so `--player-controls` doesn't match the `layer` keyword (`player` does
+    not equal `layer`). Compound keywords (`line-height`, `z-index`) and long
+    keywords (≥ 7 chars) fall back to substring match.
+
+    Leading digits/underscores are stripped per part so `--100dvh` resolves to
+    `dvh` (viewport) and `--space-3` to `space` (spacing).
+
+    If name inference yields nothing, fall back to value-based inference —
+    opaque hash names from CSS-in-JS (`--sx-105wzx7: #edbf0a`) still tell
+    us their role through the value.
+    """
     n = name.lower().lstrip("-")
+    parts = n.split("-")
+    stripped = [p.strip("0123456789_") for p in parts]
+
     for role, keywords in _TOKEN_ROLE_KEYWORDS:
         for kw in keywords:
-            if kw in n:
-                return role
-    return "other"
+            if "-" in kw or len(kw) >= 7:
+                if kw in n:
+                    return role
+            else:
+                if kw in parts or kw in stripped:
+                    return role
+
+    # Name said nothing — try the value.
+    fallback = _infer_role_from_value(value)
+    return fallback or "other"
 
 
-_DISPLAY_ORDER = ["color", "typography", "spacing", "radius", "size", "motion", "other"]
+_DISPLAY_ORDER = [
+    "color",
+    "typography",
+    "spacing",
+    "radius",
+    "size",
+    "motion",
+    "effect",
+    "z-index",
+    "viewport",
+    "breakpoint",
+    "grid",
+    "cursor",
+    "aspect",
+    "other",
+]
 
 
 def _harvest_named_tokens(captures: list[RawCapture]) -> list[NamedToken]:
@@ -360,7 +475,7 @@ def _harvest_named_tokens(captures: list[RawCapture]) -> list[NamedToken]:
             if name not in seen:
                 seen[name] = value
     tokens = [
-        NamedToken(name=n, value=v, role=_infer_token_role(n)) for n, v in seen.items()
+        NamedToken(name=n, value=v, role=_infer_token_role(n, v)) for n, v in seen.items()
     ]
     # Display order prioritises palette + type since they carry the most design
     # signal; the inference order (above) is specificity-first to disambiguate
