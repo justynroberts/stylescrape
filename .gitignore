@@ -53,10 +53,14 @@ tmp/
 # Batch run output directories — keep generated catalogues out of git
 design-systems-*/
 devtools/
-observability/
-incident-response/
-itsm/
+observability*/
+incident-response*/
+itsm*/
 out/
+linear-deep.md
+*-deep/
+*-systems/
+*-catalogue/
 
 # Playwright
 playwright-report/
