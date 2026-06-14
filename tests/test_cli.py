@@ -170,7 +170,7 @@ def test_batch_end_to_end_with_mocked_render(tmp_path, mocker):
     ]
     mocker.patch("stylescrape.cli.discover", return_value=sites)
 
-    async def fake_scrape(url, _opts):
+    async def fake_scrape(url, _opts, pages=1):
         return _fake_tokens()
 
     mocker.patch("stylescrape.batch._scrape", side_effect=fake_scrape)
@@ -205,7 +205,7 @@ def test_batch_exits_nonzero_when_all_fail(tmp_path, mocker):
         return_value=[DiscoveredSite("X", "https://x.example.com", "")],
     )
 
-    async def boom(_url, _opts):
+    async def boom(_url, _opts, pages=1):
         raise RenderError("could not load")
 
     mocker.patch("stylescrape.batch._scrape", side_effect=boom)

@@ -2,6 +2,12 @@
 
 **Source:** {{ tokens.url }}
 **Detected scheme:** {{ tokens.scheme }}
+{%- if tokens.pages_rendered and tokens.pages_rendered | length > 1 %}
+**Pages rendered:** {{ tokens.pages_rendered | length }}
+{%- for p in tokens.pages_rendered %}
+- {{ p }}
+{%- endfor %}
+{%- endif %}
 
 ## Colour palette
 
@@ -45,3 +51,68 @@
 {%- for c in tokens.components %}
 | {{ c.name }} | {{ 'yes' if c.present else 'no' }} | {{ c.notes }} |
 {%- endfor %}
+
+## Layout
+
+- **Pattern:** {{ tokens.layout.layout_label or "unknown" }}
+- **Max content width:** {{ tokens.layout.max_content_width or "—" }}
+{%- if tokens.layout.container_widths %}
+- **Container widths observed:** {{ tokens.layout.container_widths | join(", ") }}
+{%- endif %}
+{%- if tokens.layout.grid_patterns %}
+- **Grid templates:**
+{%- for g in tokens.layout.grid_patterns %}
+  - `{{ g }}`
+{%- endfor %}
+{%- endif %}
+{%- if tokens.layout.common_gaps %}
+- **Common gaps:** {{ tokens.layout.common_gaps | join(", ") }}
+{%- endif %}
+{%- if tokens.layout.section_paddings %}
+- **Section paddings:** {{ tokens.layout.section_paddings | join(" | ") }}
+{%- endif %}
+
+## Scale analysis
+
+{%- if tokens.scale.type_ratio_name %}
+- **Type scale:** base {{ tokens.scale.type_base_px }}px, ratio {{ "%.3f"|format(tokens.scale.type_ratio) }} ({{ tokens.scale.type_ratio_name }})
+{%- else %}
+- **Type scale:** insufficient data
+{%- endif %}
+{%- if tokens.scale.spacing_base_px %}
+- **Spacing base:** {{ tokens.scale.spacing_base_px }}px, multipliers in use: {{ tokens.scale.spacing_multipliers | join(", ") }}
+{%- else %}
+- **Spacing base:** no clear modal unit
+{%- endif %}
+
+## Elevation steps
+{% if tokens.elevation %}
+| Step | Hex | Luminance |
+|---|---|---|
+{%- for e in tokens.elevation %}
+| {{ e.step }} | `{{ e.hex }}` | {{ e.luminance }} |
+{%- endfor %}
+{% else %}
+_No distinct surface tones detected._
+{%- endif %}
+
+## Named tokens (CSS custom properties)
+{% if tokens.named_tokens %}
+{%- set role_groups = {} %}
+{%- for t in tokens.named_tokens %}
+{%- if t.role not in role_groups %}{% set _ = role_groups.update({t.role: []}) %}{% endif %}
+{%- set _ = role_groups[t.role].append(t) %}
+{%- endfor %}
+{%- for role, items in role_groups.items() %}
+
+### {{ role }}
+{% for t in items[:20] %}
+- `{{ t.name }}`: `{{ t.value }}`
+{%- endfor %}
+{%- if items | length > 20 %}
+- _…and {{ items | length - 20 }} more {{ role }} tokens_
+{%- endif %}
+{%- endfor %}
+{% else %}
+_No CSS custom properties exposed on `:root`._
+{%- endif %}

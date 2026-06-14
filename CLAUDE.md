@@ -91,17 +91,19 @@ Full flag semantics are in the README / SPEC (FR-05).
 
 - Single-site mode: render → extract → aggregate → component detect → two-stage `claude -p` → stdout.
 - Output formats: `prompt` (LLM-polished brief, default), `markdown` (offline catalogue), `json` (raw tokens).
-- Batch mode (`--batch "<query>" -o <dir>`): `claude -p` discovers top N sites for a category, then each is rendered concurrently and written as a per-site file plus an `index.md` catalogue. Failures are isolated.
-- Flags: `--dark`/`--light` colour-scheme forcing, `--selector` focus, `--screenshot`, `--no-claude` / `--prompt-only`, `--with-prompt` (batch + claude per site), `--dry-run` (discovery only), `--concurrency`, `--count`, `--model`, `--wait`, `--verbose`, `--output`.
+- Batch mode (`--batch "<query>" -o <dir>`): `claude -p` discovers top N sites for a category, then each is rendered concurrently and written as a per-site file plus an `index.md` catalogue. Failures are isolated. Blocked / interstitial pages (Cloudflare, captcha, 403/404, "Access Denied") detected by title and flagged distinctly in the index.
+- Multi-page mode (`--pages N`, default 1, max 5): auto-discovers same-origin subpages (`/pricing`, `/about`, `/features`, `/docs`, etc.) and renders them alongside the landing page. Captures pool into a single aggregation, giving wider type scales, more named-token harvest, and stronger frequency signal. Works in both single and batch modes.
+- Depth extraction added in this round: **layout DNA** (max-width, container patterns, grid templates, gaps, section paddings, layout-shape label), **scale ratios** (modal type-scale ratio name + base px; spacing base unit + multipliers), **stepped surface elevation** (ΔE<5 on background-only colours, sorted dark→light), **CSS custom-property harvest** (`:root` variables grouped by inferred role).
+- Flags: `--dark`/`--light` colour-scheme forcing, `--selector` focus, `--screenshot`, `--no-claude` / `--prompt-only`, `--with-prompt` (batch + claude per site), `--dry-run` (discovery only), `--concurrency`, `--count`, `--pages`, `--model`, `--wait`, `--verbose`, `--output`.
 - ΔE-2000 colour clustering via `colormath2` (sRGB-distance fallback).
-- 86 unit tests, ruff-clean. Installs via `pipx install -e .` plus `playwright install chromium`.
+- 126 unit tests, ruff-clean. Installs via `pipx install -e .` plus `playwright install chromium`.
 
 ## Spec features NOT shipped
 
-- **CSS custom-property resolution.** v0.3 promised this; the inspector originally captured `:root` custom props but nothing in the aggregator consumed them, so the capture was removed in cleanup. Re-add the JS extract in `inspector.py` and wire `RawCapture.stylesheet_custom_props` back if you implement it.
 - **Auth via `--cookie-file` / `--auth-header`.** Still v2 territory.
 - **`--compare` mode.** Open question, not started.
 - **ASCII wireframe in the prompt output.** Open question, not started.
+- **Bypassing bot detection.** Sites that block headless Chromium (WAFs, PerimeterX, etc.) are detected by the post-render block-title scan and surfaced as ⚠ in `index.md`. We do not run UA-spoofing or stealth-mode mitigations.
 
 When adding features, prefer the layered pipeline (renderer → inspector → aggregator → component_detector → prompt_builder) over plumbing new data flows directly to the CLI.
 

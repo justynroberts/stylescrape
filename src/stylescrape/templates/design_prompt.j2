@@ -1,10 +1,12 @@
 You are about to receive a structured description of a website's design system, extracted from {{ tokens.url }}. Rewrite it as a clear, self-contained design brief that another instance of Claude can use as a prefix when generating UI work in this aesthetic.
 
 Rules for your output:
-- Use hex values, not CSS variable names.
+- Use hex values, not CSS variable names — unless the source includes named tokens (see NAMED TOKENS section). When named tokens are present, mention 2-4 of the most distinctive ones in the COLOUR PALETTE / NAMED VOCABULARY sections so the brief carries the team's vocabulary.
 - Describe components in natural language, not CSS rules.
 - Lead with the personality paragraph as the framing.
-- Keep section headings: PERSONALITY, COLOUR PALETTE, TYPOGRAPHY, SPACING & SHAPE, ELEVATION, MOTION, COMPONENTS, USAGE.
+- Keep section headings: PERSONALITY, COLOUR PALETTE, TYPOGRAPHY, SPACING & SHAPE, LAYOUT, ELEVATION, MOTION, COMPONENTS, NAMED VOCABULARY (if any tokens found, else omit), USAGE.
+- In LAYOUT, translate the raw max-width and grid patterns into a one-sentence shape description (e.g. "Narrow centered column under 1024px with single-column hero, 3-column feature grid below").
+- In TYPOGRAPHY, if a scale ratio is given, mention it (e.g. "1.25× major-third scale anchored at 16px"). Same for spacing base.
 - In USAGE, give 3-5 short instructions for applying this system in new UI work.
 - Do not invent values that aren't in the source. If something is empty, say so honestly.
 - Do not include preamble, meta-commentary, or "here is the brief" — just the brief itself.
@@ -52,6 +54,55 @@ COMPONENTS DETECTED:
   treatment: {{ c.treatment }}
 {%- endif %}
 {%- endfor %}
+
+LAYOUT:
+- Pattern label: {{ tokens.layout.layout_label }}
+- Max content width: {{ tokens.layout.max_content_width or "none observed" }}
+{%- if tokens.layout.container_widths %}
+- Container widths: {{ tokens.layout.container_widths | join(", ") }}
+{%- endif %}
+{%- if tokens.layout.grid_patterns %}
+- Grid templates: {{ tokens.layout.grid_patterns | join(" | ") }}
+{%- endif %}
+{%- if tokens.layout.common_gaps %}
+- Gaps in use: {{ tokens.layout.common_gaps | join(", ") }}
+{%- endif %}
+{%- if tokens.layout.section_paddings %}
+- Section paddings: {{ tokens.layout.section_paddings | join(" | ") }}
+{%- endif %}
+
+SCALE ANALYSIS:
+- Type base: {{ tokens.scale.type_base_px }}px
+{%- if tokens.scale.type_ratio_name %}
+- Type ratio: {{ "%.3f"|format(tokens.scale.type_ratio) }} ({{ tokens.scale.type_ratio_name }})
+{%- endif %}
+{%- if tokens.scale.spacing_base_px %}
+- Spacing base: {{ tokens.scale.spacing_base_px }}px (multipliers: {{ tokens.scale.spacing_multipliers | join(", ") }})
+{%- endif %}
+
+ELEVATION STEPS (sorted dark→light):
+{%- for e in tokens.elevation %}
+- step {{ e.step }}: {{ e.hex }} (luminance {{ e.luminance }})
+{%- endfor %}
+
+NAMED VOCABULARY (CSS custom properties from :root, grouped by role):
+{%- set vocab = {} %}
+{%- for t in tokens.named_tokens %}{% if t.role not in vocab %}{% set _ = vocab.update({t.role: []}) %}{% endif %}{% set _ = vocab[t.role].append(t) %}{% endfor %}
+{%- if vocab %}
+{%- for role, items in vocab.items() %}
+- {{ role }}: {{ items[:8] | map(attribute='name') | join(', ') }}{% if items | length > 8 %} (+{{ items | length - 8 }} more){% endif %}
+{%- endfor %}
+{%- else %}
+- _none_
+{%- endif %}
+
+{%- if tokens.pages_rendered and tokens.pages_rendered | length > 1 %}
+
+PAGES SAMPLED ({{ tokens.pages_rendered | length }}):
+{%- for p in tokens.pages_rendered %}
+- {{ p }}
+{%- endfor %}
+{%- endif %}
 
 === END SOURCE ===
 

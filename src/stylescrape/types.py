@@ -25,6 +25,8 @@ class RawCapture:
     title: str
     sampled_styles: dict[str, dict[str, str]]
     dom_signals: dict[str, Any]
+    layout_samples: dict[str, dict[str, str]] = field(default_factory=dict)
+    custom_props: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -66,6 +68,47 @@ class ComponentPattern:
 
 
 @dataclass
+class LayoutTokens:
+    """Spatial structure — how the page lays itself out, not what's in it."""
+
+    max_content_width: str = ""
+    container_widths: list[str] = field(default_factory=list)
+    grid_patterns: list[str] = field(default_factory=list)
+    common_gaps: list[str] = field(default_factory=list)
+    section_paddings: list[str] = field(default_factory=list)
+    layout_label: str = ""  # narrow-centered / edge-to-edge / asymmetric / unknown
+
+
+@dataclass
+class ScaleAnalysis:
+    """Derived ratios — turns raw size lists into a design decision."""
+
+    type_base_px: float = 0.0
+    type_ratio: float = 0.0
+    type_ratio_name: str = ""  # e.g. 'major-third', 'perfect-fourth'
+    spacing_base_px: int = 0
+    spacing_multipliers: list[int] = field(default_factory=list)
+
+
+@dataclass
+class ElevationStep:
+    """A distinct background-only tone — one rung in the surface ladder."""
+
+    hex: str
+    step: int  # 1 = base surface, 2 = elevated 1, ...
+    luminance: float
+
+
+@dataclass
+class NamedToken:
+    """A CSS custom property (--foo) declared on :root — design vocabulary."""
+
+    name: str
+    value: str
+    role: str = ""  # color / spacing / radius / motion / typography / size / other
+
+
+@dataclass
 class DesignTokens:
     url: str
     title: str
@@ -75,6 +118,11 @@ class DesignTokens:
     shape: ShapeTokens
     motion: MotionTokens
     components: list[ComponentPattern]
+    layout: LayoutTokens = field(default_factory=LayoutTokens)
+    scale: ScaleAnalysis = field(default_factory=ScaleAnalysis)
+    elevation: list[ElevationStep] = field(default_factory=list)
+    named_tokens: list[NamedToken] = field(default_factory=list)
+    pages_rendered: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -86,4 +134,9 @@ class DesignTokens:
             "shape": self.shape.__dict__,
             "motion": self.motion.__dict__,
             "components": [c.__dict__ for c in self.components],
+            "layout": self.layout.__dict__,
+            "scale": self.scale.__dict__,
+            "elevation": [e.__dict__ for e in self.elevation],
+            "named_tokens": [t.__dict__ for t in self.named_tokens],
+            "pages_rendered": self.pages_rendered,
         }

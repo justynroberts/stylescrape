@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 from .aggregator import aggregate
 from .component_detector import detect
 from .discovery import DiscoveredSite
-from .inspector import capture
+from .inspector import capture, capture_pages
 from .prompt_builder import build
 from .renderer import RenderError, rendered_page
 from .types import DesignTokens, RenderOptions
@@ -80,11 +80,16 @@ def slugify(url_or_name: str) -> str:
     return slug or "site"
 
 
-async def _scrape(url: str, opts: RenderOptions) -> DesignTokens:
-    async with rendered_page(url, opts) as page:
-        cap = await capture(page)
-    tokens = aggregate(cap)
-    tokens.components = detect(cap)
+async def _scrape(
+    url: str, opts: RenderOptions, pages: int = 1
+) -> DesignTokens:
+    if pages > 1:
+        captures = await capture_pages(url, opts, max_pages=pages)
+    else:
+        async with rendered_page(url, opts) as page:
+            captures = [await capture(page)]
+    tokens = aggregate(captures)
+    tokens.components = detect(captures[0])
     return tokens
 
 
@@ -100,6 +105,7 @@ async def run_batch(
     use_claude: bool = False,
     model: str | None = None,
     on_progress: ProgressCb | None = None,
+    pages: int = 1,
 ) -> list[BatchResult]:
     """Render each site concurrently and write its design-system file."""
     output_dir = Path(output_dir)
@@ -115,7 +121,7 @@ async def run_batch(
         async with sem:
             t0 = time.monotonic()
             try:
-                tokens = await _scrape(site.url, opts)
+                tokens = await _scrape(site.url, opts, pages=pages)
             except RenderError as exc:
                 result.error = str(exc)
                 result.elapsed_s = time.monotonic() - t0

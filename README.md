@@ -141,6 +141,10 @@ stylescrape https://linear.app --screenshot linear.png --output linear-system.md
 
 # 9. Verbose: see per-stage timings + skipped probes
 stylescrape https://anthropic.com --verbose
+
+# 9a. Multi-page render — auto-crawl /pricing, /about, /features, etc.
+#     Richer extraction (more frequency data, wider size scale, named-token harvest).
+stylescrape https://linear.app -p 3 --format markdown --output linear-deep.md
 ```
 
 ### Batch catalogues
@@ -166,6 +170,11 @@ stylescrape --batch "top 10 terminal apps" --dark -o ./terminals/
 
 # 16. JSON per site instead of markdown — for programmatic consumption
 stylescrape --batch "top 10 SaaS pricing pages" --format json -o ./pricing/
+
+# 16a. Deep batch — render 3 pages per site so the catalogue captures
+#      layout DNA, named-token vocabularies, and stepped surface elevations.
+#      ~3x slower per site; worth it for design-research depth.
+stylescrape --batch "top 10 observability vendors" -p 3 -o ./obs-deep/
 ```
 
 ### Composing with other tools
@@ -220,10 +229,15 @@ That whole block is designed to be pasted as a prefix into your next "build me a
 
 ```
 URL → Playwright (Chromium, 1440×900, networkidle)
-    → Inspector: ~30 sample selectors × 18 computed CSS props
-    → Aggregator: rgb()→hex, ΔE colour clustering, frequency rank
+    → Inspector: ~30 styling probes + ~13 layout probes + :root custom-prop dump
+    → (optional) Auto-crawl /pricing, /about, /features → render + capture each
+    → Aggregator: rgb()→hex, ΔE colour clustering, frequency rank,
+      scale-ratio detection, spacing-base detection, layout pattern,
+      tighter background-only ΔE pass for elevation steps,
+      named-token harvest with role inference
     → Component detector: heuristic DOM/ARIA/classname matching
-    → Jinja2 prompt template
+    → Jinja2 prompt template (Layout, Scale, Elevation, Named Vocabulary
+      sections in addition to palette/type/shape/motion/components)
     → claude -p (stage 1: personality, stage 2: assembly)
     → stdout
 ```
@@ -232,6 +246,16 @@ The pipeline deliberately samples a fixed set of representative selectors rather
 
 Two `claude -p` calls instead of one keeps each prompt small and focused: stage 1 turns raw tokens into a short personality paragraph, stage 2 embeds that paragraph into the full template and polishes the result into a design brief. Skip the whole LLM stage with `--no-claude`.
 
+### Depth: what you get vs. what you can get
+
+| Flag | What happens | Typical wall clock |
+|---|---|---|
+| `-p 1` (default) | Renders the URL you gave. | 3–8s |
+| `-p 2` | Adds one auto-discovered subpage (`/pricing` or `/about` if linked from the landing page). | +5–10s |
+| `-p 3` | Three pages total — the richest catalogue without going crazy. | +10–20s |
+
+Multi-page gives you a wider type scale, more named tokens, more component patterns, and frequency counts that actually reflect what's reused. Use `-p 3` when you want a brief detailed enough to drive "build me a comparable UI" prompts.
+
 ## Options
 
 | Flag | Default | Notes |
@@ -239,6 +263,7 @@ Two `claude -p` calls instead of one keeps each prompt small and focused: stage 
 | `--format` | `prompt` | `prompt`, `json`, or `markdown` |
 | `--prompt-only` | off | Print assembled prompt without calling claude |
 | `--no-claude` | off | Alias for `--prompt-only` |
+| `--pages <n>` / `-p` | `1` | Render this many same-origin pages (auto-crawls subpages) |
 | `--wait <ms>` | `2000` | Extra wait after networkidle |
 | `--selector <css>` | none | Focus extraction on a container |
 | `--dark` / `--light` | off | Force prefers-color-scheme |

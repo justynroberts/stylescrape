@@ -61,7 +61,7 @@ class TestSlugify:
 
 class TestRunBatch:
     def test_writes_one_file_per_success(self, tmp_path, mocker):
-        async def fake_scrape(url, _opts):
+        async def fake_scrape(url, _opts, pages=1):
             return _fake_tokens(url)
 
         mocker.patch.object(batch_mod, "_scrape", side_effect=fake_scrape)
@@ -88,7 +88,7 @@ class TestRunBatch:
     def test_failure_isolated(self, tmp_path, mocker):
         from stylescrape.renderer import RenderError
 
-        async def fake_scrape(url, _opts):
+        async def fake_scrape(url, _opts, pages=1):
             if "broken" in url:
                 raise RenderError("could not load")
             return _fake_tokens(url)
@@ -111,7 +111,7 @@ class TestRunBatch:
         assert not (tmp_path / "broken-example-com.md").exists()
 
     def test_progress_callback_fires(self, tmp_path, mocker):
-        async def fake_scrape(url, _opts):
+        async def fake_scrape(url, _opts, pages=1):
             return _fake_tokens(url)
 
         mocker.patch.object(batch_mod, "_scrape", side_effect=fake_scrape)
@@ -138,7 +138,7 @@ class TestRunBatch:
         in_flight = 0
         peak = 0
 
-        async def fake_scrape(url, _opts):
+        async def fake_scrape(url, _opts, pages=1):
             nonlocal in_flight, peak
             in_flight += 1
             peak = max(peak, in_flight)
@@ -214,7 +214,7 @@ class TestDetectBlockSignal:
 
 class TestRunBatchBlockedFlow:
     def test_blocked_capture_writes_file_and_flags_result(self, tmp_path, mocker):
-        async def fake_scrape(url, _opts):
+        async def fake_scrape(url, _opts, pages=1):
             t = _fake_tokens(url)
             t.title = "Access Denied"
             return t
@@ -231,7 +231,7 @@ class TestRunBatchBlockedFlow:
         assert (tmp_path / "locked-example-com.md").exists()
 
     def test_progress_emits_blocked_event(self, tmp_path, mocker):
-        async def fake_scrape(url, _opts):
+        async def fake_scrape(url, _opts, pages=1):
             t = _fake_tokens(url)
             t.title = "Just a moment..."
             return t

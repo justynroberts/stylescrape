@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 from stylescrape.aggregator import (
+    _aggregate_layout,
     _cluster_colors,
     _color_distance,
+    _detect_elevation_steps,
+    _detect_spacing_base,
+    _detect_type_scale,
     _font_role,
+    _harvest_named_tokens,
+    _infer_token_role,
     _is_dark,
+    _layout_label,
+    _name_for_ratio,
     _non_system_font_first,
     _parse_color,
+    _px,
     _rgb_to_hex,
     aggregate,
 )
@@ -195,3 +204,210 @@ class TestAggregateEndToEnd:
         assert "150ms" in tokens.motion.durations
         # Either an ease keyword or cubic-bezier should be captured
         assert tokens.motion.easings
+
+
+class TestPxParse:
+    def test_px(self):
+        assert _px("24px") == 24.0
+        assert _px("1.5px") == 1.5
+
+    def test_rem(self):
+        assert _px("1rem") == 16.0
+
+    def test_none(self):
+        assert _px("auto") is None
+        assert _px("") is None
+
+
+class TestScaleNames:
+    def test_major_third(self):
+        assert _name_for_ratio(1.25) == "major-third"
+
+    def test_perfect_fourth(self):
+        assert _name_for_ratio(1.333) == "perfect-fourth"
+
+    def test_golden_ratio(self):
+        assert _name_for_ratio(1.618) == "golden"
+
+    def test_arbitrary_ratio_is_custom(self):
+        # Both values sit >0.05 from every named ratio so they fall through.
+        assert _name_for_ratio(1.7) == "custom"
+        assert _name_for_ratio(1.85) == "custom"
+
+    def test_below_one(self):
+        assert _name_for_ratio(0.9) == ""
+
+
+class TestTypeScaleDetection:
+    def test_major_third_scale(self):
+        # 16, 20, 25 — major-third (1.25x)
+        base, ratio, name = _detect_type_scale([16.0, 20.0, 25.0])
+        assert base == 16.0
+        assert 1.24 < ratio < 1.26
+        assert name == "major-third"
+
+    def test_perfect_fourth_scale(self):
+        # 12, 16, 21.33 — perfect-fourth (1.333x)
+        _base, ratio, name = _detect_type_scale([12.0, 16.0, 21.33])
+        assert 1.32 < ratio < 1.35
+        assert name == "perfect-fourth"
+
+    def test_insufficient_data(self):
+        _base, ratio, name = _detect_type_scale([16.0])
+        assert ratio == 0.0 and name == ""
+
+
+class TestSpacingBaseDetection:
+    def test_eight_base(self):
+        base, mults = _detect_spacing_base([8, 16, 24, 32, 48])
+        assert base == 8
+        assert set(mults) >= {1, 2, 3, 4, 6}
+
+    def test_four_base(self):
+        base, mults = _detect_spacing_base([4, 8, 12, 20])
+        # Could be detected as 4 (preferred) or 8
+        assert base in (4, 8)
+        assert mults
+
+    def test_no_consistent_base(self):
+        base, _mults = _detect_spacing_base([3, 7, 11, 19])
+        # No common base under our thresholds — should return 0
+        assert base == 0
+
+
+class TestLayoutLabel:
+    def test_narrow(self):
+        assert _layout_label(768.0) == "narrow-centered"
+
+    def test_standard(self):
+        assert _layout_label(1024.0) == "standard-centered"
+
+    def test_wide(self):
+        assert _layout_label(1280.0) == "wide-centered"
+
+    def test_edge_to_edge(self):
+        assert _layout_label(1920.0) == "edge-to-edge"
+
+    def test_unknown(self):
+        assert _layout_label(None) == "unknown"
+
+
+class TestLayoutAggregate:
+    def test_extracts_max_width_and_label(self):
+        cap = RawCapture(
+            url="https://x", title="x",
+            sampled_styles={}, dom_signals={"bodyBg": "rgb(255,255,255)"},
+            layout_samples={
+                "main#0": {"max-width": "1024px", "display": "block"},
+                "[class*='container']#1": {"max-width": "1024px"},
+                "[class*='grid']#2": {"display": "grid", "grid-template-columns": "repeat(3, 1fr)", "gap": "24px"},
+            },
+        )
+        layout = _aggregate_layout([cap])
+        assert layout.max_content_width == "1024px"
+        assert layout.layout_label == "standard-centered"
+        assert "repeat(3, 1fr)" in layout.grid_patterns[0]
+        assert "24px" in layout.common_gaps
+
+
+class TestElevation:
+    def test_steps_sorted_by_luminance(self):
+        # Use background tones spaced widely enough that ΔE<5 won't collapse them.
+        cap = RawCapture(
+            url="https://x", title="x",
+            sampled_styles={
+                "body": {"background-color": "rgb(15, 15, 17)"},
+                "main": {"background-color": "rgb(80, 80, 80)"},
+                "[class*='card']": {"background-color": "rgb(200, 200, 200)"},
+            },
+            dom_signals={"bodyBg": "rgb(15, 15, 17)"},
+        )
+        steps = _detect_elevation_steps([cap])
+        assert len(steps) >= 2  # At least the darks vs lights should split
+        # Sorted dark→light
+        assert steps[0].luminance < steps[-1].luminance
+        assert steps[0].step == 1
+
+    def test_no_backgrounds_returns_empty(self):
+        cap = RawCapture(
+            url="https://x", title="x",
+            sampled_styles={"body": {"color": "rgb(0,0,0)"}},
+            dom_signals={},
+        )
+        assert _detect_elevation_steps([cap]) == []
+
+
+class TestNamedTokens:
+    def test_infer_role(self):
+        assert _infer_token_role("--color-primary") == "color"
+        assert _infer_token_role("--bg-elevated") == "color"
+        assert _infer_token_role("--space-3") == "spacing"
+        assert _infer_token_role("--radius-md") == "radius"
+        assert _infer_token_role("--duration-fast") == "motion"
+        assert _infer_token_role("--font-sans") == "typography"
+        assert _infer_token_role("--unknown-thing") == "other"
+
+    def test_text_ambiguity_resolves_to_color(self):
+        # 'text-*' tokens are usually text colour ("text-primary", "text-muted").
+        # The heuristic intentionally biases to color since that's the more common
+        # design-token meaning. Size tokens usually carry their own size noun.
+        assert _infer_token_role("--text-primary") == "color"
+        assert _infer_token_role("--text-muted") == "color"
+
+    def test_harvest_dedupes_and_sorts_by_role(self):
+        cap1 = RawCapture(
+            url="https://x", title="x", sampled_styles={}, dom_signals={},
+            custom_props={
+                "--space-3": "12px",
+                "--color-primary": "#5E6AD2",
+                "--unknown": "...",
+            },
+        )
+        cap2 = RawCapture(
+            url="https://x/pricing", title="x", sampled_styles={}, dom_signals={},
+            custom_props={
+                "--color-primary": "different",  # dedup wins by first capture
+                "--radius-md": "8px",
+            },
+        )
+        tokens = _harvest_named_tokens([cap1, cap2])
+        names = [t.name for t in tokens]
+        # Colours come before spacing before radius before other (per role order)
+        assert names.index("--color-primary") < names.index("--space-3")
+        assert names.index("--space-3") < names.index("--radius-md")
+        # Dedup preserved first value
+        col = next(t for t in tokens if t.name == "--color-primary")
+        assert col.value == "#5E6AD2"
+
+
+class TestMultiPageAggregation:
+    def test_accepts_list_and_pools_observations(self):
+        # Landing page sees Inter at 16px; pricing also sees Inter at 16px;
+        # together that gives weight 2 to that combination.
+        cap_landing = RawCapture(
+            url="https://x", title="X home",
+            sampled_styles={
+                "body": {"font-family": "Inter", "font-size": "16px", "font-weight": "400"},
+            },
+            dom_signals={"bodyBg": "rgb(255, 255, 255)"},
+        )
+        cap_pricing = RawCapture(
+            url="https://x/pricing", title="Pricing",
+            sampled_styles={
+                "body": {"font-family": "Inter", "font-size": "16px", "font-weight": "400"},
+                "h1": {"font-family": "Inter", "font-size": "48px", "font-weight": "700"},
+            },
+            dom_signals={"bodyBg": "rgb(255, 255, 255)"},
+        )
+        tokens = aggregate([cap_landing, cap_pricing])
+        # h1 from pricing made it into the scale
+        assert "48px" in tokens.typography.size_scale
+        # Pages rendered tracks both
+        assert tokens.pages_rendered == ["https://x", "https://x/pricing"]
+        # url uses the first (primary) capture
+        assert tokens.url == "https://x"
+
+    def test_empty_list_raises(self):
+        import pytest
+        with pytest.raises(ValueError):
+            aggregate([])

@@ -22,7 +22,7 @@ from .aggregator import aggregate
 from .batch import run_batch, write_index
 from .component_detector import detect
 from .discovery import discover
-from .inspector import capture
+from .inspector import capture, capture_pages
 from .prompt_builder import (
     ClaudeError,
     build,
@@ -49,35 +49,49 @@ async def _run_pipeline(
     selector: str | None,
     screenshot_path: str | None,
     verbose: bool,
+    pages: int = 1,
 ):
     timings: dict[str, float] = {}
 
-    t0 = time.monotonic()
-    async with rendered_page(url, opts) as page:
-        timings["render"] = time.monotonic() - t0
+    if pages > 1:
+        t0 = time.monotonic()
+        captures = await capture_pages(url, opts, max_pages=pages, screenshot_path=screenshot_path)
+        timings["render+inspect"] = time.monotonic() - t0
         if verbose:
-            console.log(f"[dim]rendered in {timings['render']:.2f}s[/dim]")
-
-        if selector:
-            try:
-                await page.wait_for_selector(selector, timeout=5000)
-            except Exception:
-                console.log(f"[yellow]warning:[/yellow] --selector {selector!r} not found")
-
-        t1 = time.monotonic()
-        cap = await capture(page)
-        timings["inspect"] = time.monotonic() - t1
-        if verbose:
-            console.log(f"[dim]inspected in {timings['inspect']:.2f}s[/dim]")
-
-        if screenshot_path:
-            await screenshot(page, screenshot_path)
+            console.log(
+                f"[dim]rendered + inspected {len(captures)} page(s) in {timings['render+inspect']:.2f}s[/dim]"
+            )
+            for c in captures:
+                console.log(f"[dim]  · {c.url}[/dim]")
+        primary = captures[0]
+    else:
+        t0 = time.monotonic()
+        async with rendered_page(url, opts) as page:
+            timings["render"] = time.monotonic() - t0
             if verbose:
-                console.log(f"[dim]screenshot → {screenshot_path}[/dim]")
+                console.log(f"[dim]rendered in {timings['render']:.2f}s[/dim]")
+
+            if selector:
+                try:
+                    await page.wait_for_selector(selector, timeout=5000)
+                except Exception:
+                    console.log(f"[yellow]warning:[/yellow] --selector {selector!r} not found")
+
+            t1 = time.monotonic()
+            primary = await capture(page)
+            timings["inspect"] = time.monotonic() - t1
+            if verbose:
+                console.log(f"[dim]inspected in {timings['inspect']:.2f}s[/dim]")
+
+            if screenshot_path:
+                await screenshot(page, screenshot_path)
+                if verbose:
+                    console.log(f"[dim]screenshot → {screenshot_path}[/dim]")
+        captures = [primary]
 
     t2 = time.monotonic()
-    tokens = aggregate(cap)
-    tokens.components = detect(cap)
+    tokens = aggregate(captures)
+    tokens.components = detect(primary)
     timings["aggregate"] = time.monotonic() - t2
     if verbose:
         console.log(f"[dim]aggregated in {timings['aggregate']:.2f}s[/dim]")
@@ -98,6 +112,7 @@ def _run_single(
     verbose: bool,
     outfile: str | None,
     model: str | None,
+    pages: int = 1,
 ):
     if dark and light:
         raise click.BadParameter("--dark and --light are mutually exclusive")
@@ -113,7 +128,9 @@ def _run_single(
     opts = RenderOptions(color_scheme=color_scheme, extra_wait_ms=wait)
 
     try:
-        tokens, timings = asyncio.run(_run_pipeline(url, opts, selector, shot, verbose))
+        tokens, timings = asyncio.run(
+            _run_pipeline(url, opts, selector, shot, verbose, pages=pages)
+        )
     except RenderError as exc:
         console.print(f"[red]error:[/red] {exc}")
         sys.exit(2)
@@ -152,6 +169,7 @@ def _run_batch_mode(
     with_prompt: bool,
     dry_run: bool,
     verbose: bool,
+    pages: int = 1,
 ):
     if dark and light:
         raise click.BadParameter("--dark and --light are mutually exclusive")
@@ -210,6 +228,7 @@ def _run_batch_mode(
                 use_claude=use_claude,
                 model=model,
                 on_progress=on_progress,
+                pages=pages,
             )
         )
     except KeyboardInterrupt:
@@ -273,6 +292,15 @@ def _run_batch_mode(
     help="Output file (single mode) or directory (batch mode).",
 )
 @click.option("--model", type=str, default=None, help="Override Claude model.")
+@click.option(
+    "--pages",
+    "-p",
+    type=int,
+    default=1,
+    show_default=True,
+    help="Render this many same-origin pages (landing + auto-discovered subpages "
+    "like /pricing, /about, /features). Higher = richer extraction, slower run.",
+)
 @click.version_option(__version__, prog_name="stylescrape")
 @click.pass_context
 def main(
@@ -294,6 +322,7 @@ def main(
     verbose: bool,
     output: str | None,
     model: str | None,
+    pages: int,
 ):
     """Reverse-engineer a web design system into a Claude-ready prompt.
 
@@ -309,6 +338,9 @@ def main(
     """
     if batch_query and url:
         raise click.BadParameter("URL and --batch are mutually exclusive")
+
+    if pages < 1 or pages > 5:
+        raise click.BadParameter("--pages must be between 1 and 5")
 
     if batch_query:
         if not output:
@@ -326,6 +358,7 @@ def main(
             with_prompt=with_prompt,
             dry_run=dry_run,
             verbose=verbose,
+            pages=pages,
         )
         return
 
@@ -346,6 +379,7 @@ def main(
         verbose=verbose,
         outfile=output,
         model=model,
+        pages=pages,
     )
 
 

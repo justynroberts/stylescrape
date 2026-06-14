@@ -1,4 +1,9 @@
-"""Token aggregation: dedup, hex resolution, frequency rank, ΔE colour clustering."""
+"""Token aggregation: dedup, hex resolution, frequency rank, ΔE colour clustering.
+
+Accepts either a single RawCapture or a list of them (multi-page mode). Pages
+contribute additively to the frequency counters — the same selector appearing
+across landing + pricing + features yields more weight to its computed values.
+"""
 
 from __future__ import annotations
 
@@ -9,8 +14,12 @@ from math import sqrt
 from .types import (
     ColorToken,
     DesignTokens,
+    ElevationStep,
+    LayoutTokens,
     MotionTokens,
+    NamedToken,
     RawCapture,
+    ScaleAnalysis,
     ShapeTokens,
     TypographyTokens,
 )
@@ -181,23 +190,207 @@ def _is_dark(rgb: tuple[int, int, int]) -> bool:
     return luminance < 128
 
 
-def aggregate(capture: RawCapture) -> DesignTokens:
-    sampled = capture.sampled_styles
+def _luminance(rgb: tuple[int, int, int]) -> float:
+    return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
 
-    # ---- Colour ----
-    color_meta: list[tuple[tuple[int, int, int], str, str]] = []
-    for sel, props in sampled.items():
-        for prop in ("color", "background-color", "border-color", "outline-color"):
-            raw = props.get(prop, "")
+
+def _px(value: str) -> float | None:
+    """Parse '24px' or '1.5rem' to a px float. Returns None on miss."""
+    if not value:
+        return None
+    m = re.match(r"([\d.]+)px$", value.strip())
+    if m:
+        return float(m.group(1))
+    m = re.match(r"([\d.]+)rem$", value.strip())
+    if m:
+        return float(m.group(1)) * 16.0  # rough; computed styles rarely use rem anyway
+    return None
+
+
+_SCALE_NAMES: list[tuple[float, str]] = [
+    (1.067, "minor-second"),
+    (1.125, "major-second"),
+    (1.2, "minor-third"),
+    (1.25, "major-third"),
+    (1.333, "perfect-fourth"),
+    (1.414, "augmented-fourth"),
+    (1.5, "perfect-fifth"),
+    (1.618, "golden"),
+    (1.778, "major-sixth"),
+    (2.0, "octave"),
+]
+
+
+def _name_for_ratio(r: float) -> str:
+    if r <= 1.0:
+        return ""
+    best = min(_SCALE_NAMES, key=lambda x: abs(x[0] - r))
+    return best[1] if abs(best[0] - r) < 0.05 else "custom"
+
+
+def _detect_type_scale(sizes_px: list[float]) -> tuple[float, float, str]:
+    """Return (base_px, modal_ratio, ratio_name) from a sorted ascending list."""
+    if len(sizes_px) < 2:
+        return (sizes_px[0] if sizes_px else 0.0, 0.0, "")
+    ratios = [sizes_px[i + 1] / sizes_px[i] for i in range(len(sizes_px) - 1)]
+    rounded = Counter(round(r * 100) / 100 for r in ratios)
+    modal = rounded.most_common(1)[0][0]
+    # Pick the size closest to 16px as the "base"
+    base = min(sizes_px, key=lambda s: abs(s - 16.0))
+    return base, modal, _name_for_ratio(modal)
+
+
+def _detect_spacing_base(values_px: list[int]) -> tuple[int, list[int]]:
+    if not values_px:
+        return 0, []
+    values = [v for v in values_px if v > 0]
+    if not values:
+        return 0, []
+    # Try common bases in preference order; pick the largest that fits ≥70%.
+    for base in (8, 4, 6, 16, 2):
+        matches = [v for v in values if v % base == 0]
+        if len(matches) >= len(values) * 0.7:
+            multipliers = sorted({v // base for v in matches if v // base > 0})
+            return base, multipliers[:10]
+    return 0, []
+
+
+def _layout_label(width_px: float | None) -> str:
+    if width_px is None:
+        return "unknown"
+    if width_px <= 800:
+        return "narrow-centered"
+    if width_px <= 1100:
+        return "standard-centered"
+    if width_px <= 1400:
+        return "wide-centered"
+    return "edge-to-edge"
+
+
+def _aggregate_layout(captures: list[RawCapture]) -> LayoutTokens:
+    widths: Counter[str] = Counter()
+    grid_patterns: Counter[str] = Counter()
+    gaps: Counter[str] = Counter()
+    section_pads: Counter[str] = Counter()
+
+    for cap in captures:
+        for sel_key, props in cap.layout_samples.items():
+            sel = sel_key.split("#", 1)[0]
+            mw = props.get("max-width", "").strip()
+            if mw and mw not in ("none", "0px", "auto"):
+                widths[mw] += 1
+            gt = props.get("grid-template-columns", "").strip()
+            if gt and gt != "none":
+                # Trim long pixel-list expansions; keep the structural form.
+                grid_patterns[gt[:80]] += 1
+            for k in ("gap", "row-gap", "column-gap"):
+                v = props.get(k, "").strip()
+                if v and v not in ("normal", "0px"):
+                    gaps[v] += 1
+            if "section" in sel or "hero" in sel:
+                pad = props.get("padding", "").strip()
+                if pad and pad != "0px":
+                    section_pads[pad] += 1
+
+    most_common_width = widths.most_common(1)[0][0] if widths else ""
+    label = _layout_label(_px(most_common_width))
+    return LayoutTokens(
+        max_content_width=most_common_width,
+        container_widths=[v for v, _ in widths.most_common(4)],
+        grid_patterns=[v for v, _ in grid_patterns.most_common(3)],
+        common_gaps=[v for v, _ in gaps.most_common(4)],
+        section_paddings=[v for v, _ in section_pads.most_common(3)],
+        layout_label=label,
+    )
+
+
+def _detect_elevation_steps(captures: list[RawCapture]) -> list[ElevationStep]:
+    bgs: list[tuple[tuple[int, int, int], str, str]] = []
+    for cap in captures:
+        for sel, props in cap.sampled_styles.items():
+            raw = props.get("background-color", "")
             parsed = _parse_color(raw)
             if parsed is None:
                 continue
             r, g, b, a = parsed
-            if a < 0.05:
+            if a < 0.9:
                 continue
-            color_meta.append(((r, g, b), prop, sel))
+            bgs.append(((r, g, b), "background-color", sel))
+    if not bgs:
+        return []
+    clusters = _cluster_colors(bgs, threshold=5.0)
+    sorted_by_lum = sorted(clusters, key=lambda c: _luminance(c[0]))
+    return [
+        ElevationStep(hex=_rgb_to_hex(*rgb), step=i + 1, luminance=round(_luminance(rgb), 1))
+        for i, (rgb, _freq, _sources) in enumerate(sorted_by_lum)
+    ][:8]
 
-    body_bg = _parse_color(capture.dom_signals.get("bodyBg", ""))
+
+_TOKEN_ROLE_KEYWORDS: list[tuple[str, list[str]]] = [
+    ("color", ["color", "colour", "bg", "background", "fg", "foreground", "accent",
+                "primary", "secondary", "surface", "text", "ink", "border",
+                "outline", "shadow", "ring", "tint"]),
+    ("spacing", ["space", "gap", "pad", "margin", "inset", "offset"]),
+    ("radius", ["radius", "corner", "round"]),
+    ("motion", ["duration", "speed", "timing", "ease", "transition", "animation"]),
+    ("typography", ["font", "family", "weight", "leading", "tracking", "letter"]),
+    ("size", ["size", "scale", "step", "width", "height", "max-w", "min-w"]),
+]
+
+
+def _infer_token_role(name: str) -> str:
+    n = name.lower().lstrip("-")
+    for role, keywords in _TOKEN_ROLE_KEYWORDS:
+        for kw in keywords:
+            if kw in n:
+                return role
+    return "other"
+
+
+def _harvest_named_tokens(captures: list[RawCapture]) -> list[NamedToken]:
+    seen: dict[str, str] = {}
+    for cap in captures:
+        for name, value in cap.custom_props.items():
+            if name not in seen:
+                seen[name] = value
+    tokens = [
+        NamedToken(name=n, value=v, role=_infer_token_role(n)) for n, v in seen.items()
+    ]
+    # Group by role for stable, readable output: colours first, then spacing, etc.
+    role_order = {r[0]: i for i, r in enumerate(_TOKEN_ROLE_KEYWORDS)}
+    role_order["other"] = len(role_order)
+    tokens.sort(key=lambda t: (role_order.get(t.role, 99), t.name))
+    return tokens
+
+
+def aggregate(captures: RawCapture | list[RawCapture]) -> DesignTokens:
+    """Aggregate one or more captures into a DesignTokens.
+
+    Multi-page mode passes captures from /pricing, /about, /docs etc.
+    alongside the landing page so the secondary palette, form treatments,
+    and deeper navigation contribute to the frequency-ranked output.
+    """
+    if isinstance(captures, RawCapture):
+        captures = [captures]
+    if not captures:
+        raise ValueError("aggregate() requires at least one RawCapture")
+    primary = captures[0]
+
+    # ---- Colour ----
+    color_meta: list[tuple[tuple[int, int, int], str, str]] = []
+    for cap in captures:
+        for sel, props in cap.sampled_styles.items():
+            for prop in ("color", "background-color", "border-color", "outline-color"):
+                raw = props.get(prop, "")
+                parsed = _parse_color(raw)
+                if parsed is None:
+                    continue
+                r, g, b, a = parsed
+                if a < 0.05:
+                    continue
+                color_meta.append(((r, g, b), prop, sel))
+
+    body_bg = _parse_color(primary.dom_signals.get("bodyBg", ""))
     is_dark = bool(body_bg and _is_dark(body_bg[:3]))
 
     clusters = _cluster_colors(color_meta, threshold=10.0)
@@ -228,28 +421,29 @@ def aggregate(capture: RawCapture) -> DesignTokens:
     line_heights: Counter[str] = Counter()
     letter_spacings: Counter[str] = Counter()
 
-    for _sel, props in sampled.items():
-        ff = props.get("font-family", "")
-        if ff:
-            role = _font_role(ff)
-            primary = _non_system_font_first(ff)
-            if primary:
-                families_by_role[role][_norm_font_stack(ff)] += 1
-        fs = props.get("font-size", "")
-        if fs:
-            sizes[fs.strip()] += 1
-        fw_raw = props.get("font-weight", "")
-        try:
-            fw_int = int(fw_raw)
-            weights[fw_int] += 1
-        except ValueError:
-            pass
-        lh = props.get("line-height", "")
-        if lh and lh != "normal":
-            line_heights[lh] += 1
-        ls = props.get("letter-spacing", "")
-        if ls and ls != "normal":
-            letter_spacings[ls] += 1
+    for cap in captures:
+        for _sel, props in cap.sampled_styles.items():
+            ff = props.get("font-family", "")
+            if ff:
+                role = _font_role(ff)
+                primary_font = _non_system_font_first(ff)
+                if primary_font:
+                    families_by_role[role][_norm_font_stack(ff)] += 1
+            fs = props.get("font-size", "")
+            if fs:
+                sizes[fs.strip()] += 1
+            fw_raw = props.get("font-weight", "")
+            try:
+                fw_int = int(fw_raw)
+                weights[fw_int] += 1
+            except ValueError:
+                pass
+            lh = props.get("line-height", "")
+            if lh and lh != "normal":
+                line_heights[lh] += 1
+            ls = props.get("letter-spacing", "")
+            if ls and ls != "normal":
+                letter_spacings[ls] += 1
 
     fam_out: dict[str, str] = {}
     for role, ctr in families_by_role.items():
@@ -280,16 +474,17 @@ def aggregate(capture: RawCapture) -> DesignTokens:
     radii: Counter[str] = Counter()
     shadows: Counter[str] = Counter()
     spacings: Counter[str] = Counter()
-    for _sel, props in sampled.items():
-        r = props.get("border-radius", "")
-        if r and r != "0px":
-            radii[r] += 1
-        sh = props.get("box-shadow", "")
-        if sh and sh != "none":
-            shadows[sh] += 1
-        pad = props.get("padding", "")
-        if pad and pad != "0px":
-            spacings[pad] += 1
+    for cap in captures:
+        for _sel, props in cap.sampled_styles.items():
+            r = props.get("border-radius", "")
+            if r and r != "0px":
+                radii[r] += 1
+            sh = props.get("box-shadow", "")
+            if sh and sh != "none":
+                shadows[sh] += 1
+            pad = props.get("padding", "")
+            if pad and pad != "0px":
+                spacings[pad] += 1
 
     shape = ShapeTokens(
         radii=[v for v, _ in radii.most_common(8)],
@@ -300,38 +495,74 @@ def aggregate(capture: RawCapture) -> DesignTokens:
     # ---- Motion ----
     durations: Counter[str] = Counter()
     easings: Counter[str] = Counter()
-    for _sel, props in sampled.items():
-        t = props.get("transition", "")
-        if not t or t in ("all 0s ease 0s", "none"):
-            continue
-        for m in re.finditer(r"([\d.]+m?s)", t):
-            durations[m.group(1)] += 1
-        for kw in (
-            "ease",
-            "ease-in",
-            "ease-out",
-            "ease-in-out",
-            "linear",
-            "cubic-bezier",
-        ):
-            if kw in t:
-                # capture full cubic-bezier(...) if present
-                m = re.search(r"cubic-bezier\([^)]+\)", t)
-                easings[m.group(0) if m and kw == "cubic-bezier" else kw] += 1
-                break
+    for cap in captures:
+        for _sel, props in cap.sampled_styles.items():
+            t = props.get("transition", "")
+            if not t or t in ("all 0s ease 0s", "none"):
+                continue
+            for m in re.finditer(r"([\d.]+m?s)", t):
+                durations[m.group(1)] += 1
+            for kw in (
+                "ease",
+                "ease-in",
+                "ease-out",
+                "ease-in-out",
+                "linear",
+                "cubic-bezier",
+            ):
+                if kw in t:
+                    m = re.search(r"cubic-bezier\([^)]+\)", t)
+                    easings[m.group(0) if m and kw == "cubic-bezier" else kw] += 1
+                    break
 
     motion = MotionTokens(
         durations=[v for v, _ in durations.most_common(6)],
         easings=[v for v, _ in easings.most_common(4)],
     )
 
+    # ---- Scale analysis (derived ratios) ----
+    type_sizes_px = sorted({_px(s) for s in size_scale if _px(s)})
+    type_sizes_px = [s for s in type_sizes_px if s is not None]
+    type_base, type_ratio, type_ratio_name = _detect_type_scale(type_sizes_px)
+
+    # Spacing base from any single-axis padding/margin/gap value seen
+    spacing_px: list[int] = []
+    for cap in captures:
+        for _sel, props in cap.sampled_styles.items():
+            for key in ("padding", "margin"):
+                v = props.get(key, "")
+                if not v:
+                    continue
+                for tok in v.split():
+                    px = _px(tok)
+                    if px and px > 0:
+                        spacing_px.append(round(px))
+    spacing_base, spacing_multipliers = _detect_spacing_base(spacing_px)
+    scale = ScaleAnalysis(
+        type_base_px=type_base,
+        type_ratio=type_ratio,
+        type_ratio_name=type_ratio_name,
+        spacing_base_px=spacing_base,
+        spacing_multipliers=spacing_multipliers,
+    )
+
+    # ---- Layout, elevation, named tokens ----
+    layout = _aggregate_layout(captures)
+    elevation = _detect_elevation_steps(captures)
+    named_tokens = _harvest_named_tokens(captures)
+
     return DesignTokens(
-        url=capture.url,
-        title=capture.title,
+        url=primary.url,
+        title=primary.title,
         scheme="dark" if is_dark else "light",
         colors=color_tokens,
         typography=typography,
         shape=shape,
         motion=motion,
         components=[],  # filled in by component_detector
+        layout=layout,
+        scale=scale,
+        elevation=elevation,
+        named_tokens=named_tokens,
+        pages_rendered=[c.url for c in captures],
     )
