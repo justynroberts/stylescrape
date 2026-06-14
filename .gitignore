@@ -50,6 +50,14 @@ htmlcov/
 scratch/
 tmp/
 
+# Batch run output directories — keep generated catalogues out of git
+design-systems-*/
+devtools/
+observability/
+incident-response/
+itsm/
+out/
+
 # Playwright
 playwright-report/
 test-results/
