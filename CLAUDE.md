@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 StyleScrape is a local Python CLI that takes a URL, renders it with headless Chromium, extracts computed design tokens (colour, type, spacing, motion, components), and pipes a structured summary through `claude -p` to produce a reusable design-system prompt. The output is meant to be dropped into future UI generation prompts as a prefix.
 
-Status: **draft spec, no code yet**. The spec lives in this directory as the source of truth — see the README/spec for full functional requirements. This file captures the bits that future sessions need to operate without re-reading the whole spec.
+Status: **v0.3.0 shipped**, single-site mode + batch mode both live. The README is the as-built doc; `SPEC.md` is the original draft (preserved). This file captures what a future session needs to operate without re-reading either.
 
 ## Architecture (planned)
 
@@ -87,13 +87,23 @@ Full flag semantics are in the README / SPEC (FR-05).
 - GUI
 - SaaS / telemetry / accounts
 
-## Phasing
+## What's actually shipped (v0.3.0)
 
-- v0.1: rendering + computed-style extraction, colour/font/radius/shadow tokens, basic `claude -p`, `--prompt-only` and `--json`.
-- v0.2: component detection, two-stage LLM pipeline, `--selector`, `--screenshot`.
-- v0.3: `--dark`/`--light`, ΔE clustering, CSS custom property resolution, Jinja2 templates, pipx packaging.
+- Single-site mode: render → extract → aggregate → component detect → two-stage `claude -p` → stdout.
+- Output formats: `prompt` (LLM-polished brief, default), `markdown` (offline catalogue), `json` (raw tokens).
+- Batch mode (`--batch "<query>" -o <dir>`): `claude -p` discovers top N sites for a category, then each is rendered concurrently and written as a per-site file plus an `index.md` catalogue. Failures are isolated.
+- Flags: `--dark`/`--light` colour-scheme forcing, `--selector` focus, `--screenshot`, `--no-claude` / `--prompt-only`, `--with-prompt` (batch + claude per site), `--dry-run` (discovery only), `--concurrency`, `--count`, `--model`, `--wait`, `--verbose`, `--output`.
+- ΔE-2000 colour clustering via `colormath2` (sRGB-distance fallback).
+- 86 unit tests, ruff-clean. Installs via `pipx install -e .` plus `playwright install chromium`.
 
-When adding features, check which phase they belong to and whether the prerequisite phase is in.
+## Spec features NOT shipped
+
+- **CSS custom-property resolution.** v0.3 promised this; the inspector originally captured `:root` custom props but nothing in the aggregator consumed them, so the capture was removed in cleanup. Re-add the JS extract in `inspector.py` and wire `RawCapture.stylesheet_custom_props` back if you implement it.
+- **Auth via `--cookie-file` / `--auth-header`.** Still v2 territory.
+- **`--compare` mode.** Open question, not started.
+- **ASCII wireframe in the prompt output.** Open question, not started.
+
+When adding features, prefer the layered pipeline (renderer → inspector → aggregator → component_detector → prompt_builder) over plumbing new data flows directly to the CLI.
 
 ## Error-handling expectations
 

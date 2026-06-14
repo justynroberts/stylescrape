@@ -72,7 +72,6 @@ async def _run_pipeline(
 
         if screenshot_path:
             await screenshot(page, screenshot_path)
-            cap.screenshot_path = screenshot_path
             if verbose:
                 console.log(f"[dim]screenshot → {screenshot_path}[/dim]")
 

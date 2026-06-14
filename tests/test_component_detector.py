@@ -9,11 +9,8 @@ from stylescrape.types import RawCapture
 def _cap(counts=None, classes=None, has=None, styles=None) -> RawCapture:
     return RawCapture(
         url="https://example.com",
-        final_url="https://example.com",
         title="x",
-        color_scheme_detected="light",
         sampled_styles=styles or {},
-        stylesheet_custom_props={},
         dom_signals={"counts": counts or {}, "classes": classes or {}, "has": has or {}},
     )
 

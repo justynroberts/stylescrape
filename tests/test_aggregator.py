@@ -113,11 +113,8 @@ class TestNonSystemFontFirst:
 def _fake_capture(sampled=None, dom_signals=None) -> RawCapture:
     return RawCapture(
         url="https://example.com",
-        final_url="https://example.com",
         title="Example",
-        color_scheme_detected="light",
         sampled_styles=sampled or {},
-        stylesheet_custom_props={},
         dom_signals=dom_signals or {"bodyBg": "rgb(255, 255, 255)"},
     )
 

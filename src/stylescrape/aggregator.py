@@ -125,7 +125,7 @@ def _cluster_colors(
     return [(c["rgb"], c["freq"], c["sources"]) for c in clusters]
 
 
-def _role_for_color(prop: str, sel: str, is_dark_scheme: bool) -> str:
+def _role_for_color(prop: str, sel: str) -> str:
     sel_l = sel.lower()
     if prop == "background-color":
         if sel == "body":
@@ -209,7 +209,7 @@ def aggregate(capture: RawCapture) -> DesignTokens:
         first = sources[0]
         idx = first.rfind(".")
         sel0, prop0 = first[:idx], first[idx + 1 :]
-        role = _role_for_color(prop0, sel0, is_dark)
+        role = _role_for_color(prop0, sel0)
         role_counter[role] += 1
         suffix = f".{role_counter[role]}" if role_counter[role] > 1 else ""
         color_tokens.append(

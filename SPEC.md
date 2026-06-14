@@ -1,7 +1,12 @@
 # StyleScrape — Design Spec
 
-**Status:** Draft v1.0 — June 2026
+**Status:** Draft v1.0 — June 2026 (preserved as original spec)
 **Author:** Justyn Roberts
+
+> **As-built note (v0.3.0 shipped):** This is the original draft. See `README.md` for the actual current behaviour. Most of the spec landed as written; two deltas worth flagging:
+>
+> - **Added:** batch / promiscuous mode (`stylescrape --batch "<query>" -o <dir>`) — uses `claude -p` to discover the top N sites for a category, then renders each concurrently and writes one markdown per site + an `index.md` catalogue. Not in the original FR list.
+> - **Deferred:** CSS custom-property resolution (FR-02). The inspector originally captured `:root` custom props but nothing consumed them downstream, so the capture was removed in cleanup. Re-add if/when needed.
 
 ## Overview
 

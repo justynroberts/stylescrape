@@ -97,21 +97,6 @@ _JS_EXTRACT = """
 }
 """
 
-_JS_CUSTOM_PROPS = """
-() => {
-  const out = {};
-  const root = document.documentElement;
-  const cs = window.getComputedStyle(root);
-  for (const name of cs) {
-    if (name.startsWith('--')) {
-      const v = cs.getPropertyValue(name).trim();
-      if (v) out[name] = v;
-    }
-  }
-  return out;
-}
-"""
-
 _JS_DOM_SIGNALS = """
 () => {
   const q = (s) => document.querySelectorAll(s).length;
@@ -151,15 +136,13 @@ _JS_DOM_SIGNALS = """
       toggle: has('[role=switch], input[type=checkbox]'),
     },
     bodyBg: window.getComputedStyle(document.body).getPropertyValue('background-color'),
-    htmlBg: window.getComputedStyle(document.documentElement).getPropertyValue('background-color'),
-    scheme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
   };
 }
 """
 
 
 async def capture(page: Page) -> RawCapture:
-    """Pull computed styles, custom props, and structural signals."""
+    """Pull computed styles and structural signals from the rendered page."""
     try:
         title = await page.title()
     except Exception:
@@ -168,15 +151,11 @@ async def capture(page: Page) -> RawCapture:
     sampled = await page.evaluate(
         _JS_EXTRACT, {"selectors": SAMPLE_SELECTORS, "props": CSS_PROPS}
     )
-    custom_props = await page.evaluate(_JS_CUSTOM_PROPS)
     dom_signals = await page.evaluate(_JS_DOM_SIGNALS)
 
     return RawCapture(
         url=page.url,
-        final_url=page.url,
         title=title,
-        color_scheme_detected=dom_signals.get("scheme", "light"),
         sampled_styles=sampled,
-        stylesheet_custom_props=custom_props,
         dom_signals=dom_signals,
     )

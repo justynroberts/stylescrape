@@ -22,13 +22,9 @@ class RawCapture:
     """Everything the inspector pulled out of the live page."""
 
     url: str
-    final_url: str
     title: str
-    color_scheme_detected: str
     sampled_styles: dict[str, dict[str, str]]
-    stylesheet_custom_props: dict[str, str]
     dom_signals: dict[str, Any]
-    screenshot_path: str | None = None
 
 
 @dataclass
