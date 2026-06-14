@@ -28,6 +28,8 @@ Module layout the spec commits to:
 - `aggregator.py` — resolves `rgb()`→hex, clusters colours by ΔE<10 to find the real palette, frequency-ranks font sizes/radii/shadows, strips system fonts unless they're the only option.
 - `component_detector.py` — heuristics over semantic elements, ARIA roles, classname patterns, and child structure. Output is a list of (pattern, visual treatment).
 - `prompt_builder.py` — fills a Jinja2 template. Sections: personality, palette, typography, spacing/shape, elevation, motion, component inventory, usage instructions.
+- `discovery.py` — turns a category prompt ("top 10 CRM tools") into a vetted list of URLs by piping a JSON-schema request through `claude -p`. Validates URLs, dedupes by host, respects the count ceiling.
+- `batch.py` — orchestrates the discovery + per-site pipeline. Renders concurrently under a semaphore (default 3), isolates failures (one bad render does not kill the run), writes a markdown per site plus an `index.md` catalogue.
 
 ### Two-stage LLM pipeline
 
@@ -56,20 +58,26 @@ The generated prompt must include **hex values, not CSS variable names**, and de
 
 Don't substitute these without reason — Playwright over Puppeteer is a deliberate Python-ergonomics call, and ΔE clustering depends on `colormath`.
 
-## Commands (once implemented)
+## Commands
 
 ```bash
 # install
 pipx install -e .
 playwright install chromium
 
-# run
+# single-site mode
 stylescrape <url> [--format prompt|json|markdown] [--prompt-only]
             [--wait <ms>] [--selector <css>] [--dark|--light]
             [--screenshot] [--verbose] [--output <file>] [--no-claude]
+
+# batch / promiscuous mode — uses claude -p for discovery, then renders
+# each site concurrently and writes a markdown per site + index.md
+stylescrape --batch "<query>" -o <dir> [-n <count>] [-c <concurrency>]
+            [--format markdown|json|prompt] [--with-prompt] [--dry-run]
+            [--dark|--light] [--verbose]
 ```
 
-Full flag semantics are in the spec (FR-05).
+Full flag semantics are in the README / SPEC (FR-05).
 
 ## Non-goals (do not creep into these)
 

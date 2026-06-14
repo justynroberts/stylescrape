@@ -30,6 +30,8 @@ Requirements:
 
 ## Use
 
+### Single-site mode
+
 ```bash
 stylescrape https://linear.app
 ```
@@ -63,6 +65,49 @@ stylescrape https://linear.app --output linear-system.md
 # Show timings + skipped probes
 stylescrape https://linear.app --verbose
 ```
+
+### Batch / promiscuous mode
+
+Point at a category instead of a URL. StyleScrape asks `claude -p` for the top N sites in that category, then renders each one concurrently and writes a markdown per site plus an `index.md` catalogue into the output directory.
+
+```bash
+stylescrape --batch "top 10 CRM tools" -o ./crm-systems
+
+# tighter run with custom count + concurrency
+stylescrape --batch "top 5 password managers" -n 5 -c 3 -o ./pw/
+
+# discover only — see which sites would be rendered
+stylescrape --batch "top 10 admin UI templates" -o ./out --dry-run
+
+# also run the two-stage claude polish per site (slower, costs LLM calls)
+stylescrape --batch "top 5 dev tool landing pages" --with-prompt -o ./out
+```
+
+You get back a directory like:
+
+```
+./crm-systems/
+├── index.md            # catalogue with rationale + status per site
+├── salesforce-com.md   # design system per site
+├── hubspot-com.md
+├── pipedrive-com.md
+├── zoho-com.md
+└── ...
+```
+
+Each site renders independently — one failure (timeout, blocked region, JS bomb) doesn't kill the run. The failure shows up in `index.md` with the reason.
+
+Batch flags:
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--batch "<query>"` | — | Enables batch mode. Mutually exclusive with `<url>`. |
+| `--count` / `-n` | `10` | Number of sites to discover and scrape. Max 50. |
+| `--output` / `-o` | required | Output directory. |
+| `--concurrency` / `-c` | `3` | Concurrent page renders. |
+| `--format` | `markdown` | Per-site format: `markdown`, `json`, or `prompt`. |
+| `--with-prompt` | off | Also run the two-stage `claude -p` per site. |
+| `--dry-run` | off | Discover URLs and print them; skip rendering. |
 
 ## What you get back
 
@@ -145,12 +190,14 @@ Module layout:
 
 ```
 src/stylescrape/
-  cli.py                  # Click entrypoint
+  cli.py                  # Click entrypoint (single + batch modes)
   renderer.py             # Playwright wrapper
   inspector.py            # Sample selectors + computed-style probe
   aggregator.py           # ΔE clustering, frequency rank, role inference
   component_detector.py   # Heuristic component pattern matching
   prompt_builder.py       # Jinja2 + claude -p subprocess
+  discovery.py            # claude -p → list of URLs for a category
+  batch.py                # Orchestrate concurrent renders + write catalogue
   templates/              # *.j2 templates for personality, design brief, markdown
   types.py                # Dataclasses passed between stages
 ```

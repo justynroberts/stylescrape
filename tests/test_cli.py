@@ -108,3 +108,109 @@ def test_falls_back_to_prompt_only_when_claude_missing():
     assert result.exit_code == 0, result.output
     # Without claude, we emit the raw two-stage prompts
     assert "STAGE 1" in result.output
+
+
+def test_no_args_shows_help():
+    runner = CliRunner()
+    result = runner.invoke(main, [])
+    assert result.exit_code == 0
+    assert "stylescrape" in result.output.lower() or "url" in result.output.lower()
+
+
+def test_batch_and_url_mutually_exclusive():
+    runner = CliRunner()
+    result = runner.invoke(
+        main, ["example.com", "--batch", "top 5 CRM tools", "-o", "out"]
+    )
+    assert result.exit_code != 0
+    assert "mutually exclusive" in result.output.lower()
+
+
+def test_batch_requires_output():
+    runner = CliRunner()
+    result = runner.invoke(main, ["--batch", "top 5 CRM tools"])
+    assert result.exit_code != 0
+    assert "--output" in result.output
+
+
+def test_batch_dry_run_lists_sites(tmp_path):
+    from stylescrape.discovery import DiscoveredSite
+
+    runner = CliRunner()
+    with patch(
+        "stylescrape.cli.discover",
+        return_value=[
+            DiscoveredSite("Linear", "https://linear.app", "issue tracker"),
+            DiscoveredSite("Notion", "https://notion.so", "wiki + db"),
+        ],
+    ):
+        result = runner.invoke(
+            main,
+            [
+                "--batch",
+                "top 2 productivity tools",
+                "-o",
+                str(tmp_path),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    assert "Linear" in result.output
+    assert "Notion" in result.output
+    # No actual files written in dry run
+    assert not (tmp_path / "linear-app.md").exists()
+
+
+def test_batch_end_to_end_with_mocked_render(tmp_path, mocker):
+    from stylescrape.discovery import DiscoveredSite
+
+    sites = [
+        DiscoveredSite("Linear", "https://linear.app", "issue tracker"),
+        DiscoveredSite("Notion", "https://notion.so", "wiki + db"),
+    ]
+    mocker.patch("stylescrape.cli.discover", return_value=sites)
+
+    async def fake_scrape(url, _opts):
+        return _fake_tokens()
+
+    mocker.patch("stylescrape.batch._scrape", side_effect=fake_scrape)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["--batch", "top 2 productivity tools", "-o", str(tmp_path)],
+    )
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "linear-app.md").exists()
+    assert (tmp_path / "notion-so.md").exists()
+    assert (tmp_path / "index.md").exists()
+    index = (tmp_path / "index.md").read_text()
+    assert "top 2 productivity tools" in index
+    assert "linear-app.md" in index
+
+
+def test_batch_count_out_of_range():
+    runner = CliRunner()
+    result = runner.invoke(main, ["--batch", "x", "-o", "out", "-n", "0"])
+    assert result.exit_code != 0
+    assert "1 and 50" in result.output
+
+
+def test_batch_exits_nonzero_when_all_fail(tmp_path, mocker):
+    from stylescrape.discovery import DiscoveredSite
+    from stylescrape.renderer import RenderError
+
+    mocker.patch(
+        "stylescrape.cli.discover",
+        return_value=[DiscoveredSite("X", "https://x.example.com", "")],
+    )
+
+    async def boom(_url, _opts):
+        raise RenderError("could not load")
+
+    mocker.patch("stylescrape.batch._scrape", side_effect=boom)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["--batch", "x", "-o", str(tmp_path)])
+    # Exit 4 = all-failed signal
+    assert result.exit_code == 4, result.output
